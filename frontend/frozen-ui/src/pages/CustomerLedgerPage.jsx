@@ -1031,7 +1031,16 @@ const CustomerLedgerPage = () => {
         await loadCustomerData(selectedCustomer.id)
         await fetchCustomers()
       } else {
-        const errorMsg = error?.response?.data?.message || error?.response?.data?.errors?.join(', ') || error?.message || 'Failed to save payment'
+        // Safely extract error message
+        let errorMsg = 'Failed to save payment'
+        if (error?.response?.data?.message) {
+          errorMsg = error.response.data.message
+        } else if (error?.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+          errorMsg = error.response.data.errors.join(', ')
+        } else if (error?.message) {
+          errorMsg = error.message
+        }
+        
         toast.error(errorMsg, {
           duration: 5000
         })

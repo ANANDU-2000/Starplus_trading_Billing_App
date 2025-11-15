@@ -122,6 +122,12 @@ const PaymentModal = ({ isOpen, onClose, invoiceId, customerId, onPaymentSuccess
       }
     } catch (error) {
       console.error('Failed to save payment:', error)
+      console.log('❌ Payment error:', {
+        message: error?.message,
+        responseData: error?.response?.data,
+        responseStatus: error?.response?.status,
+        fullError: error
+      })
       
       // Handle HTTP 409 Conflict (concurrent modification)
       if (error.message?.includes('CONFLICT') || error.response?.status === 409) {
@@ -133,19 +139,16 @@ const PaymentModal = ({ isOpen, onClose, invoiceId, customerId, onPaymentSuccess
         if (onPaymentSuccess) {
           onPaymentSuccess(null) // Pass null to indicate refresh needed
         }
+      } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        // Show backend errors array
+        const errorMsg = error.response.data.errors.join(', ')
+        toast.error(errorMsg)
       } else if (error.response?.data?.message) {
         // Show backend error message
         toast.error(error.response.data.message)
       } else {
         toast.error(error?.message || 'Failed to save payment')
       }
-      
-      // Log full error for debugging
-      console.error('Payment error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      })
     } finally {
       setLoading(false)
     }

@@ -277,9 +277,18 @@ api.interceptors.response.use(
       connectionManager.markConnected()
       showThrottledError(error.response?.data?.message || 'Server error. Please try again later.')
     } else if (error.response?.data?.message) {
-      // Server is responding
+      // Server is responding with message
       connectionManager.markConnected()
       showThrottledError(error.response.data.message)
+    } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+      // Server is responding with errors array
+      connectionManager.markConnected()
+      const errorMsg = error.response.data.errors.join(', ')
+      showThrottledError(errorMsg)
+    } else if (error.response?.data) {
+      // Server is responding but structure is different
+      connectionManager.markConnected()
+      showThrottledError('An error occurred. Please try again.')
     } else {
       // Unknown error
       connectionManager.markConnected()
