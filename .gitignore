@@ -1,0 +1,87 @@
+# .NET Build outputs
+bin/
+obj/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+.vs/
+.fake
+
+# Database files (SQLite removed, PostgreSQL connection is via env vars)
+*.db
+*.db-shm
+*.db-wal
+*.sql.backup
+
+# Node & Frontend
+node_modules/
+dist/
+build/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+
+# Backups & Data exports
+backups/
+*.backup
+*.bak
+*.sql
+
+# Uploads (keep structure, ignore files)
+wwwroot/uploads/*
+!wwwroot/uploads/.gitkeep
+invoices/
+statements/
+reports/
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+
+# Environment & Configuration (CRITICAL - Never commit secrets!)
+.env
+.env.local
+.env.production
+.env.development
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Local.json
+*.env
+
+# Build artifacts
+*.dll
+*.exe
+*.pdb
+publish/
+TestResults/
+coverage/
+
+
+
+# NuGet
+packages/
+*.nupkg
+

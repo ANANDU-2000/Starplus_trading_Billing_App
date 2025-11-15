@@ -1,0 +1,14 @@
+[build]
+  base = "frontend/frozen-ui"
+  command = "npm install && npm run build"
+  publish = "dist"
+
+# Environment variables should be set in Netlify Dashboard:
+# 1. Go to Site settings → Environment variables
+# 2. Add: VITE_API_BASE_URL = https://your-backend-url/api
+# 3. Redeploy after setting environment variables
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
