@@ -334,6 +334,73 @@ namespace FrozenApi.Controllers
             }
         }
 
+        [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<ApiResponse<object>>> DeletePurchase(int id)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Invalid user authentication"
+                    });
+                }
+
+                // Check if purchase exists first
+                var purchase = await _purchaseService.GetPurchaseByIdAsync(id);
+                if (purchase == null)
+                {
+                    return NotFound(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Purchase not found"
+                    });
+                }
+
+                _logger.LogInformation("🗑️ Deleting purchase ID: {Id}, Invoice: {Invoice}", id, purchase.InvoiceNo);
+
+                var result = await _purchaseService.DeletePurchaseAsync(id, userId);
+                
+                if (!result)
+                {
+                    return NotFound(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Purchase not found or already deleted"
+                    });
+                }
+
+                _logger.LogInformation("✅ Purchase deleted successfully: ID {Id}", id);
+
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "Purchase deleted successfully. Stock quantities have been reversed.",
+                    Data = new 
+                    { 
+                        DeletedPurchaseId = id,
+                        InvoiceNo = purchase.InvoiceNo,
+                        Supplier = purchase.SupplierName,
+                        ItemsCount = purchase.Items?.Count ?? 0
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Purchase deletion error: {Message}", ex.Message);
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "Failed to delete purchase. Please try again.",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpPost("{id}/upload")]
         [Authorize(Roles = "Admin,Staff")]
         public async Task<ActionResult<ApiResponse<string>>> UploadInvoice(int id, IFormFile file)

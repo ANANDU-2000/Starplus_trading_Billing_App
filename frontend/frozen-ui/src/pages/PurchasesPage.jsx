@@ -236,6 +236,36 @@ const PurchasesPage = () => {
     setShowForm(true)
   }
 
+  const handleDeletePurchase = async (purchase) => {
+    const confirmMessage = `⚠️ WARNING: Delete Purchase?\n\n` +
+      `Invoice: ${purchase.invoiceNo}\n` +
+      `Supplier: ${purchase.supplierName}\n` +
+      `Amount: AED ${purchase.totalAmount.toFixed(2)}\n` +
+      `Items: ${purchase.items?.length || 0}\n\n` +
+      `This will:\n` +
+      `✅ Reverse all stock changes\n` +
+      `✅ Remove inventory transactions\n` +
+      `✅ Delete purchase record\n\n` +
+      `This action cannot be undone!`
+    
+    if (!window.confirm(confirmMessage)) return
+
+    try {
+      const response = await purchasesAPI.deletePurchase(purchase.id)
+      if (response.success) {
+        toast.success(`Purchase deleted! Stock reversed for ${response.data.itemsCount} items.`)
+        loadPurchases()
+        loadProducts() // Refresh products to show updated stock
+      } else {
+        toast.error(response.message || 'Failed to delete purchase')
+      }
+    } catch (error) {
+      console.error('Delete purchase error:', error)
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to delete purchase'
+      toast.error(`Delete failed: ${errorMsg}`)
+    }
+  }
+
   // TALLY ERP PURCHASE VOUCHER STYLE
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-50">
@@ -538,11 +568,13 @@ const PurchasesPage = () => {
                               <Edit className="h-3.5 w-3.5" />
                               Edit
                             </button>
-                            <button className="bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
-                              title="View Purchase"
+                            <button 
+                              onClick={() => handleDeletePurchase(purchase)}
+                              className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white border border-red-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
+                              title="Delete Purchase"
                             >
-                              <Eye className="h-3.5 w-3.5" />
-                              View
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
                             </button>
                           </div>
                         </td>

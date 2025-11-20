@@ -254,6 +254,16 @@ export const purchasesAPI = {
     const response = await api.post('/purchases', purchase)
     return response.data
   },
+
+  updatePurchase: async (id, purchase) => {
+    const response = await api.put(`/purchases/${id}`, purchase)
+    return response.data
+  },
+
+  deletePurchase: async (id) => {
+    const response = await api.delete(`/purchases/${id}`)
+    return response.data
+  },
 }
 
 export const customersAPI = {

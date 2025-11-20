@@ -15,6 +15,7 @@ namespace FrozenApi.Services
         Task<PurchaseDto?> GetPurchaseByIdAsync(int id);
         Task<PurchaseDto> CreatePurchaseAsync(CreatePurchaseRequest request, int userId);
         Task<PurchaseDto?> UpdatePurchaseAsync(int id, CreatePurchaseRequest request, int userId);
+        Task<bool> DeletePurchaseAsync(int id, int userId);
     }
 
     public class PurchaseService : IPurchaseService
@@ -349,6 +350,72 @@ namespace FrozenApi.Services
             }
             catch
             {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        public async Task<bool> DeletePurchaseAsync(int id, int userId)
+        {
+            var purchase = await _context.Purchases
+                .Include(p => p.Items)
+                .FirstOrDefaultAsync(p => p.Id == id);
+
+            if (purchase == null)
+                return false;
+
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // CRITICAL: Reverse all stock changes before deleting
+                foreach (var item in purchase.Items)
+                {
+                    var product = await _context.Products.FindAsync(item.ProductId);
+                    if (product != null)
+                    {
+                        // Calculate base quantity that was added during purchase
+                        var baseQty = item.Qty * product.ConversionToBase;
+                        
+                        // Subtract the purchased quantity to reverse the stock increase
+                        product.StockQty -= baseQty;
+                        product.UpdatedAt = DateTime.UtcNow;
+
+                        // Log the reversal
+                        Console.WriteLine($"🔄 Reversing stock for {product.NameEn}: -{baseQty} (Purchase ID: {id})");
+                    }
+                }
+
+                // Remove all inventory transactions related to this purchase
+                var inventoryTransactions = await _context.InventoryTransactions
+                    .Where(t => t.RefId == id && t.TransactionType == TransactionType.Purchase)
+                    .ToListAsync();
+                _context.InventoryTransactions.RemoveRange(inventoryTransactions);
+
+                // Remove all purchase items
+                _context.PurchaseItems.RemoveRange(purchase.Items);
+
+                // Remove the purchase record
+                _context.Purchases.Remove(purchase);
+
+                // Create audit log for deletion
+                var auditLog = new AuditLog
+                {
+                    UserId = userId,
+                    Action = "Purchase Deleted",
+                    Details = $"Deleted Purchase: Supplier={purchase.SupplierName}, Invoice={purchase.InvoiceNo}, Total={purchase.TotalAmount:C}, Items={purchase.Items.Count}",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.AuditLogs.Add(auditLog);
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                Console.WriteLine($"✅ Purchase deleted successfully: ID={id}, Invoice={purchase.InvoiceNo}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Purchase deletion failed: {ex.Message}");
                 await transaction.RollbackAsync();
                 throw;
             }
