@@ -220,7 +220,8 @@ const ProductsPage = () => {
         toast.success('Stock adjusted successfully')
         setShowStockModal(false)
         setSelectedProduct(null)
-        loadProducts()
+        // Force reload to show updated stock
+        await loadProducts()
       } else {
         toast.error(response?.message || 'Failed to adjust stock')
       }
