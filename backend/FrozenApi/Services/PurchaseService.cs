@@ -14,6 +14,7 @@ namespace FrozenApi.Services
         Task<PagedResponse<PurchaseDto>> GetPurchasesAsync(int page = 1, int pageSize = 10);
         Task<PurchaseDto?> GetPurchaseByIdAsync(int id);
         Task<PurchaseDto> CreatePurchaseAsync(CreatePurchaseRequest request, int userId);
+        Task<PurchaseDto?> UpdatePurchaseAsync(int id, CreatePurchaseRequest request, int userId);
     }
 
     public class PurchaseService : IPurchaseService
@@ -255,6 +256,96 @@ namespace FrozenApi.Services
                 await transaction.CommitAsync();
 
                 return await GetPurchaseByIdAsync(purchase.Id) ?? throw new InvalidOperationException("Failed to retrieve created purchase");
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        public async Task<PurchaseDto?> UpdatePurchaseAsync(int id, CreatePurchaseRequest request, int userId)
+        {
+            var purchase = await _context.Purchases
+                .Include(p => p.Items)
+                .FirstOrDefaultAsync(p => p.Id == id);
+
+            if (purchase == null)
+                return null;
+
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // Reverse old stock changes
+                foreach (var oldItem in purchase.Items)
+                {
+                    var product = await _context.Products.FindAsync(oldItem.ProductId);
+                    if (product != null)
+                    {
+                        var oldBaseQty = oldItem.Qty * product.ConversionToBase;
+                        product.StockQty -= oldBaseQty; // Reverse old purchase
+                    }
+                }
+
+                // Remove old items and transactions
+                _context.PurchaseItems.RemoveRange(purchase.Items);
+                var oldTransactions = await _context.InventoryTransactions
+                    .Where(t => t.RefId == id && t.TransactionType == TransactionType.Purchase)
+                    .ToListAsync();
+                _context.InventoryTransactions.RemoveRange(oldTransactions);
+
+                // Update purchase details
+                purchase.SupplierName = request.SupplierName;
+                purchase.InvoiceNo = request.InvoiceNo ?? purchase.InvoiceNo;
+                purchase.PurchaseDate = request.PurchaseDate;
+                purchase.ExpenseCategory = request.ExpenseCategory;
+
+                // Add new items and update stock
+                decimal totalAmount = 0;
+                foreach (var item in request.Items)
+                {
+                    var product = await _context.Products.FindAsync(item.ProductId);
+                    if (product == null)
+                        throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
+
+                    var baseQty = item.Qty * product.ConversionToBase;
+                    var lineTotal = item.Qty * item.UnitCost;
+                    totalAmount += lineTotal;
+
+                    var purchaseItem = new PurchaseItem
+                    {
+                        PurchaseId = id,
+                        ProductId = item.ProductId,
+                        UnitType = item.UnitType,
+                        Qty = item.Qty,
+                        UnitCost = item.UnitCost,
+                        LineTotal = lineTotal
+                    };
+                    _context.PurchaseItems.Add(purchaseItem);
+
+                    // Update stock with new quantity
+                    product.StockQty += baseQty;
+                    product.UpdatedAt = DateTime.UtcNow;
+
+                    // Create inventory transaction
+                    var inventoryTransaction = new InventoryTransaction
+                    {
+                        ProductId = item.ProductId,
+                        ChangeQty = baseQty,
+                        TransactionType = TransactionType.Purchase,
+                        RefId = id,
+                        Reason = $"Purchase Updated: {request.InvoiceNo}",
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.InventoryTransactions.Add(inventoryTransaction);
+                }
+
+                purchase.TotalAmount = totalAmount;
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return await GetPurchaseByIdAsync(id);
             }
             catch
             {

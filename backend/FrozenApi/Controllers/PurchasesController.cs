@@ -217,6 +217,83 @@ namespace FrozenApi.Controllers
             }
         }
 
+        [HttpPut("{id}")]
+        public async Task<ActionResult<ApiResponse<PurchaseDto>>> UpdatePurchase(int id, [FromBody] CreatePurchaseRequest request)
+        {
+            try
+            {
+                // Validate request (same as create)
+                if (request == null)
+                {
+                    return BadRequest(new ApiResponse<PurchaseDto>
+                    {
+                        Success = false,
+                        Message = "Request body is required"
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(request.SupplierName))
+                {
+                    return BadRequest(new ApiResponse<PurchaseDto>
+                    {
+                        Success = false,
+                        Message = "Supplier name is required"
+                    });
+                }
+
+                if (request.Items == null || !request.Items.Any())
+                {
+                    return BadRequest(new ApiResponse<PurchaseDto>
+                    {
+                        Success = false,
+                        Message = "Purchase must have at least one item"
+                    });
+                }
+
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new ApiResponse<PurchaseDto>
+                    {
+                        Success = false,
+                        Message = "Invalid user authentication"
+                    });
+                }
+
+                _logger.LogInformation("📝 Updating purchase ID: {Id}", id);
+
+                var result = await _purchaseService.UpdatePurchaseAsync(id, request, userId);
+                
+                if (result == null)
+                {
+                    return NotFound(new ApiResponse<PurchaseDto>
+                    {
+                        Success = false,
+                        Message = "Purchase not found"
+                    });
+                }
+
+                _logger.LogInformation("✅ Purchase updated successfully: ID {Id}", id);
+
+                return Ok(new ApiResponse<PurchaseDto>
+                {
+                    Success = true,
+                    Message = "Purchase updated successfully",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Purchase update error: {Message}", ex.Message);
+                return StatusCode(500, new ApiResponse<PurchaseDto>
+                {
+                    Success = false,
+                    Message = "Purchase update failed. Please try again.",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpPost("{id}/upload")]
         [Authorize(Roles = "Admin,Staff")]
         public async Task<ActionResult<ApiResponse<string>>> UploadInvoice(int id, IFormFile file)
