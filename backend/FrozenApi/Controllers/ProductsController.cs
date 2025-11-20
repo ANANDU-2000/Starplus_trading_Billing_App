@@ -403,6 +403,41 @@ namespace FrozenApi.Controllers
                 });
             }
         }
+
+        [HttpPost("reset-all-stock")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<ApiResponse<object>>> ResetAllStock()
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Invalid user"
+                    });
+                }
+
+                var result = await _productService.ResetAllStockAsync(userId);
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = $"Stock reset successfully for {result} products",
+                    Data = new { ProductsUpdated = result }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred while resetting stock",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
     }
 
     public class StockAdjustmentRequest

@@ -21,6 +21,7 @@ namespace FrozenApi.Services
         Task<List<ProductDto>> GetLowStockProductsAsync();
         Task<List<ProductDto>> SearchProductsAsync(string query, int limit = 20);
         Task<List<PriceChangeLogDto>> GetPriceChangeHistoryAsync(int productId);
+        Task<int> ResetAllStockAsync(int userId);
     }
 
     public class ProductService : IProductService
@@ -379,6 +380,36 @@ namespace FrozenApi.Services
                 .ToListAsync();
 
             return logs;
+        }
+
+        public async Task<int> ResetAllStockAsync(int userId)
+        {
+            var products = await _context.Products.ToListAsync();
+            var count = 0;
+
+            foreach (var product in products)
+            {
+                if (product.StockQty != 0)
+                {
+                    // Log stock adjustment
+                    var adjustment = new InventoryTransaction
+                    {
+                        ProductId = product.Id,
+                        ChangeQty = -product.StockQty,
+                        TransactionType = TransactionType.Adjustment,
+                        Reason = "Admin stock reset - All stock reset to zero",
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.InventoryTransactions.Add(adjustment);
+
+                    product.StockQty = 0;
+                    product.UpdatedAt = DateTime.UtcNow;
+                    count++;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            return count;
         }
     }
 }
