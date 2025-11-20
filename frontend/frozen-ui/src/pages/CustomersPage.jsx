@@ -72,9 +72,18 @@ const CustomersPage = () => {
         handleEdit(customerToEdit)
         // Remove the edit parameter from URL after opening modal
         setSearchParams({})
+      } else {
+        // Customer not found - show error and remove param
+        console.error(`Customer with ID ${editId} not found`)
+        toast.error(`Customer with ID ${editId} not found. Showing all customers.`)
+        setSearchParams({})
       }
+    } else if (editId && !loading && customers.length === 0) {
+      // Customers loaded but empty - customer doesn't exist
+      toast.error(`Customer with ID ${editId} not found.`)
+      setSearchParams({})
     }
-  }, [customers, searchParams])
+  }, [customers, searchParams, loading, setSearchParams])
 
   useEffect(() => {
     filterCustomers()
