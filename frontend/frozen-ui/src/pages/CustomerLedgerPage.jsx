@@ -66,6 +66,8 @@ const CustomerLedgerPage = () => {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false)
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null)
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
+  const [showEditCustomerModal, setShowEditCustomerModal] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState(null)
   const [dateRange, setDateRange] = useState({
     from: new Date(new Date().setDate(1)).toISOString().split('T')[0], // First day of month
     to: new Date().toISOString().split('T')[0] // Today
@@ -874,6 +876,66 @@ const CustomerLedgerPage = () => {
     }
   }
 
+  const handleEditCustomer = async (data) => {
+    if (!editingCustomer || !editingCustomer.id) {
+      toast.error('No customer selected for editing')
+      return
+    }
+    
+    customerLoadingRef.current = true
+    setCustomerLoading(true)
+    
+    try {
+      const customerData = {
+        name: data.name?.trim() || '',
+        phone: data.phone?.trim() || null,
+        email: data.email?.trim() || null,
+        trn: data.trn?.trim() || null,
+        address: data.address?.trim() || null,
+        creditLimit: data.creditLimit ? parseFloat(data.creditLimit) : 0
+      }
+      
+      if (!customerData.name) {
+        toast.error('Customer name is required')
+        customerLoadingRef.current = false
+        setCustomerLoading(false)
+        return
+      }
+      
+      const response = await customersAPI.updateCustomer(editingCustomer.id, customerData)
+      
+      if (response?.success) {
+        toast.success('✅ Customer updated successfully!')
+        setShowEditCustomerModal(false)
+        setEditingCustomer(null)
+        resetCustomerForm()
+        
+        // Refresh data
+        await Promise.all([
+          fetchCustomers(),
+          loadCustomerData(editingCustomer.id)
+        ])
+        
+        // Update selected customer with new data
+        if (response?.data) {
+          setSelectedCustomer(response.data)
+        }
+        
+        window.dispatchEvent(new CustomEvent('customerUpdated', { detail: response.data }))
+        window.dispatchEvent(new CustomEvent('dataUpdated'))
+      } else {
+        toast.error(response?.message || 'Failed to update customer')
+      }
+    } catch (error) {
+      console.error('Failed to update customer:', error)
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to update customer'
+      toast.error(errorMessage)
+    } finally {
+      customerLoadingRef.current = false
+      setCustomerLoading(false)
+    }
+  }
+
   /**
    * Manual reconciliation function - user can trigger to verify and fix data
    */
@@ -1449,8 +1511,16 @@ const CustomerLedgerPage = () => {
                       <>
                         <button
                           onClick={() => {
-                            // Navigate to customers page with edit mode
-                            navigate(`/customers?edit=${selectedCustomer.id}`)
+                            // Open edit modal directly instead of navigating
+                            setEditingCustomer(selectedCustomer)
+                            // Pre-fill form with current customer data
+                            customerForm.setValue('name', selectedCustomer.name)
+                            customerForm.setValue('phone', selectedCustomer.phone || '')
+                            customerForm.setValue('email', selectedCustomer.email || '')
+                            customerForm.setValue('trn', selectedCustomer.trn || '')
+                            customerForm.setValue('address', selectedCustomer.address || '')
+                            customerForm.setValue('creditLimit', selectedCustomer.creditLimit || 0)
+                            setShowEditCustomerModal(true)
                           }}
                           className="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 flex items-center gap-1 transition-colors"
                           title="Edit Customer (F3)"
@@ -2030,6 +2100,137 @@ const CustomerLedgerPage = () => {
               </span>
             ) : (
               'Add Customer'
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+
+    {/* Edit Customer Modal */}
+    <Modal
+      isOpen={showEditCustomerModal}
+      onClose={() => {
+        setShowEditCustomerModal(false)
+        setEditingCustomer(null)
+        resetCustomerForm()
+      }}
+      title="Edit Customer"
+      size="lg"
+    >
+      <form 
+        onSubmit={handleCustomerSubmit((data) => {
+          handleEditCustomer(data)
+        }, (errors) => {
+          const errorMessages = Object.values(errors).map(e => e?.message).filter(Boolean)
+          if (errorMessages.length > 0) {
+            toast.error(errorMessages[0] || 'Please fix the form errors')
+          }
+        })} 
+        className="space-y-4"
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Customer Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Enter customer name"
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                customerErrors.name ? 'border-red-500' : 'border-gray-300'
+              }`}
+              {...customerRegister('name', { required: 'Customer name is required' })}
+            />
+            {customerErrors.name && (
+              <p className="mt-1 text-sm text-red-600">{customerErrors.name.message}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input
+              type="text"
+              placeholder="+971 50 123 4567"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('phone')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              placeholder="customer@example.com"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('email')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">TRN</label>
+            <input
+              type="text"
+              placeholder="Tax Registration Number"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('trn')}
+            />
+          </div>
+
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+            <input
+              type="text"
+              placeholder="Full address"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('address')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Credit Limit</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                customerErrors.creditLimit ? 'border-red-500' : 'border-gray-300'
+              }`}
+              {...customerRegister('creditLimit', { 
+                valueAsNumber: true,
+                min: { value: 0, message: 'Credit limit must be 0 or greater' }
+              })}
+            />
+            {customerErrors.creditLimit && (
+              <p className="mt-1 text-sm text-red-600">{customerErrors.creditLimit.message}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end space-x-3 pt-4 border-t">
+          <button
+            type="button"
+            onClick={() => {
+              setShowEditCustomerModal(false)
+              setEditingCustomer(null)
+              resetCustomerForm()
+            }}
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={customerLoading || customerLoadingRef.current}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {customerLoading || customerLoadingRef.current ? (
+              <span className="flex items-center">
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Updating...
+              </span>
+            ) : (
+              'Update Customer'
             )}
           </button>
         </div>
