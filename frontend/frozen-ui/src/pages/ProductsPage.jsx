@@ -389,30 +389,33 @@ const ProductsPage = () => {
                 setEditingProduct(product)
                 setShowForm(true)
               }}
-              className="text-blue-600 hover:text-blue-900"
-              title="Edit"
+              className="bg-blue-50 text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
+              title="Edit Product"
             >
-              <Edit className="h-4 w-4" />
+              <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline text-xs font-medium">Edit</span>
             </button>
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 handleStockAdjustment(product)
               }}
-              className="text-green-600 hover:text-green-900"
+              className="bg-green-50 text-green-600 hover:text-white hover:bg-green-600 border border-green-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
               title="Adjust Stock"
             >
-              <Package className="h-4 w-4" />
+              <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline text-xs font-medium">Stock</span>
             </button>
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 handleDeleteClick(product)
               }}
-              className="text-red-600 hover:text-red-900"
-              title="Delete"
+              className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
+              title="Delete Product"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline text-xs font-medium">Delete</span>
             </button>
           </div>
         )}

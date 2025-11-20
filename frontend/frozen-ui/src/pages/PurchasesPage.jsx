@@ -9,6 +9,7 @@ const PurchasesPage = () => {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [showForm, setShowForm] = useState(false)
+  const [editingPurchase, setEditingPurchase] = useState(null)
   const [formData, setFormData] = useState({
     supplierName: '',
     invoiceNo: '',
@@ -155,10 +156,26 @@ const PurchasesPage = () => {
         }))
       }
 
-      const response = await purchasesAPI.createPurchase(purchaseData)
+      let response
+      if (editingPurchase) {
+        response = await purchasesAPI.updatePurchase(editingPurchase.id, purchaseData)
+        if (response.success) {
+          toast.success('Purchase updated successfully!')
+        } else {
+          toast.error(response.message || 'Failed to update purchase')
+        }
+      } else {
+        response = await purchasesAPI.createPurchase(purchaseData)
+        if (response.success) {
+          toast.success('Purchase created successfully!')
+        } else {
+          toast.error(response.message || 'Failed to create purchase')
+        }
+      }
+
       if (response.success) {
-        toast.success('Purchase created successfully!')
         setShowForm(false)
+        setEditingPurchase(null)
         setFormData({
           supplierName: '',
           invoiceNo: '',
@@ -167,21 +184,39 @@ const PurchasesPage = () => {
           items: []
         })
         loadPurchases()
-      } else {
-        toast.error(response.message || 'Failed to create purchase')
       }
     } catch (error) {
-      toast.error('Failed to create purchase')
+      toast.error(editingPurchase ? 'Failed to update purchase' : 'Failed to create purchase')
     }
   }
 
   const handleNewPurchase = () => {
+    setEditingPurchase(null)
     setFormData({
       supplierName: '',
       invoiceNo: '',
       purchaseDate: new Date().toISOString().split('T')[0],
       expenseCategory: 'Inventory', // Reset to default
       items: []
+    })
+    setShowForm(true)
+  }
+
+  const handleEditPurchase = (purchase) => {
+    setEditingPurchase(purchase)
+    setFormData({
+      supplierName: purchase.supplierName || '',
+      invoiceNo: purchase.invoiceNo || '',
+      purchaseDate: purchase.purchaseDate ? new Date(purchase.purchaseDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      expenseCategory: purchase.expenseCategory || 'Inventory',
+      items: purchase.items?.map(item => ({
+        productId: item.productId,
+        productName: item.productName || item.product?.nameEn || '',
+        sku: item.product?.sku || '',
+        unitType: item.unitType || 'CRTN',
+        qty: item.qty || 0,
+        unitCost: item.unitCost || 0
+      })) || []
     })
     setShowForm(true)
   }
@@ -212,7 +247,9 @@ const PurchasesPage = () => {
         {showForm && (
           <div className="bg-white rounded-lg border-2 border-lime-300 shadow-lg p-6 mb-6">
             <div className="flex items-center justify-between mb-3 sm:mb-4 border-b-2 border-lime-400 pb-2">
-              <h2 className="text-base sm:text-lg font-bold text-gray-900">Purchase Entry</h2>
+              <h2 className="text-base sm:text-lg font-bold text-gray-900">
+                {editingPurchase ? 'Edit Purchase Entry' : 'New Purchase Entry'}
+              </h2>
               <button
                 onClick={() => setShowForm(false)}
                 className="text-gray-500 hover:text-gray-700"
@@ -478,8 +515,19 @@ const PurchasesPage = () => {
                         <td className="px-3 py-2 text-center">{purchase.items?.length || 0}</td>
                         <td className="px-3 py-2">
                           <div className="flex justify-center space-x-2">
-                            <button className="text-blue-600 hover:text-blue-800">
-                              <Eye className="h-4 w-4" />
+                            <button 
+                              onClick={() => handleEditPurchase(purchase)}
+                              className="bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border border-blue-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
+                              title="Edit Purchase"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                              Edit
+                            </button>
+                            <button className="bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
+                              title="View Purchase"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              View
                             </button>
                           </div>
                         </td>
