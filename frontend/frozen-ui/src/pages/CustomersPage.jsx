@@ -412,17 +412,19 @@ const CustomersPage = () => {
                     <div className="flex items-center gap-1.5 sm:gap-2">
                       <button
                         onClick={() => handleViewLedger(customer)}
-                        className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 p-1 rounded transition-colors"
+                        className="bg-blue-50 text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
                         title="View Ledger"
                       >
                         <Eye className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:inline text-xs font-medium">View</span>
                       </button>
                       <button
                         onClick={() => handleEdit(customer)}
-                        className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 p-1 rounded transition-colors"
+                        className="bg-indigo-50 text-indigo-600 hover:text-white hover:bg-indigo-600 border border-indigo-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
                         title="Edit Customer"
                       >
                         <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:inline text-xs font-medium">Edit</span>
                       </button>
                       {user?.role?.toLowerCase() === 'admin' && (
                         <button
@@ -454,25 +456,27 @@ const CustomersPage = () => {
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => handleViewLedger(customer)}
-                    className="text-blue-600 hover:text-blue-900 p-1"
+                    className="bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border border-blue-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
                     title="View Ledger"
                   >
-                    <Eye className="h-4 w-4" />
+                    <Eye className="h-3.5 w-3.5" />
+                    View
                   </button>
                   <button
                     onClick={() => handleEdit(customer)}
-                    className="text-indigo-600 hover:text-indigo-900 p-1"
-                    title="Edit"
+                    className="bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
+                    title="Edit Customer"
                   >
-                    <Edit className="h-4 w-4" />
+                    <Edit className="h-3.5 w-3.5" />
+                    Edit
                   </button>
                   {user?.role?.toLowerCase() === 'admin' && (
                     <button
                       onClick={() => handleDelete(customer.id)}
-                      className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 px-2 py-1 rounded text-xs font-medium transition-colors"
+                      className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
                       title="Delete Customer (Admin Only)"
                     >
-                      <Trash2 className="h-3.5 w-3.5 inline mr-1" />
+                      <Trash2 className="h-3.5 w-3.5" />
                       Delete
                     </button>
                   )}
