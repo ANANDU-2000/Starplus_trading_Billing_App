@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
+import { useSearchParams } from 'react-router-dom'
 import { 
   Plus, 
   Search, 
@@ -29,6 +30,7 @@ import toast from 'react-hot-toast'
 
 const CustomersPage = () => {
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [customers, setCustomers] = useState([])
   const [filteredCustomers, setFilteredCustomers] = useState([])
@@ -60,6 +62,19 @@ const CustomersPage = () => {
     
     return () => clearInterval(refreshInterval)
   }, [])
+
+  // Handle ?edit=ID URL parameter from Customer Ledger
+  useEffect(() => {
+    const editId = searchParams.get('edit')
+    if (editId && customers.length > 0) {
+      const customerToEdit = customers.find(c => c.id === parseInt(editId))
+      if (customerToEdit) {
+        handleEdit(customerToEdit)
+        // Remove the edit parameter from URL after opening modal
+        setSearchParams({})
+      }
+    }
+  }, [customers, searchParams])
 
   useEffect(() => {
     filterCustomers()

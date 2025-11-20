@@ -250,6 +250,46 @@ namespace FrozenApi.Controllers
                     });
                 }
 
+                // Validate each item
+                foreach (var item in request.Items)
+                {
+                    if (item.ProductId <= 0)
+                    {
+                        return BadRequest(new ApiResponse<PurchaseDto>
+                        {
+                            Success = false,
+                            Message = "Invalid product ID"
+                        });
+                    }
+
+                    if (item.Qty <= 0)
+                    {
+                        return BadRequest(new ApiResponse<PurchaseDto>
+                        {
+                            Success = false,
+                            Message = "Quantity must be greater than zero"
+                        });
+                    }
+
+                    if (item.UnitCost < 0)
+                    {
+                        return BadRequest(new ApiResponse<PurchaseDto>
+                        {
+                            Success = false,
+                            Message = "Unit cost cannot be negative"
+                        });
+                    }
+
+                    if (string.IsNullOrWhiteSpace(item.UnitType))
+                    {
+                        return BadRequest(new ApiResponse<PurchaseDto>
+                        {
+                            Success = false,
+                            Message = "Unit type is required"
+                        });
+                    }
+                }
+
                 var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
                 if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
                 {

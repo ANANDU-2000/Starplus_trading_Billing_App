@@ -142,6 +142,18 @@ const PurchasesPage = () => {
       return
     }
 
+    // Validate all items have valid quantities and unit costs
+    const invalidItems = formData.items.filter(item => {
+      const qty = typeof item.qty === 'number' ? item.qty : parseFloat(item.qty)
+      const unitCost = typeof item.unitCost === 'number' ? item.unitCost : parseFloat(item.unitCost)
+      return isNaN(qty) || qty <= 0 || isNaN(unitCost) || unitCost < 0
+    })
+
+    if (invalidItems.length > 0) {
+      toast.error('All items must have valid quantity (> 0) and unit cost (>= 0)')
+      return
+    }
+
     try {
       const purchaseData = {
         supplierName: formData.supplierName,
@@ -151,8 +163,8 @@ const PurchasesPage = () => {
         items: formData.items.map(item => ({
           productId: item.productId,
           unitType: item.unitType,
-          qty: item.qty,
-          unitCost: item.unitCost
+          qty: typeof item.qty === 'number' ? item.qty : parseFloat(item.qty),
+          unitCost: typeof item.unitCost === 'number' ? item.unitCost : parseFloat(item.unitCost)
         }))
       }
 
@@ -184,9 +196,12 @@ const PurchasesPage = () => {
           items: []
         })
         loadPurchases()
+        loadProducts() // Refresh products to show updated stock
       }
     } catch (error) {
-      toast.error(editingPurchase ? 'Failed to update purchase' : 'Failed to create purchase')
+      console.error('Purchase submit error:', error)
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to save purchase'
+      toast.error(editingPurchase ? `Update failed: ${errorMsg}` : `Create failed: ${errorMsg}`)
     }
   }
 
