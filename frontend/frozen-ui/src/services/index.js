@@ -73,6 +73,11 @@ export const productsAPI = {
     })
     return response.data
   },
+
+  resetAllStock: async () => {
+    const response = await api.post('/products/reset-all-stock')
+    return response.data
+  },
 }
 
 export const salesAPI = {

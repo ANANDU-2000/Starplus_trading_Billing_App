@@ -254,6 +254,40 @@ const ProductsPage = () => {
     }
   }
 
+  const handleResetAllStock = async () => {
+    const confirmMessage = `⚠️ DANGER: Reset ALL Product Stock to Zero?\n\n` +
+      `This will set stock to 0 for ALL ${totalCount} products!\n\n` +
+      `This action:\n` +
+      `✅ Sets all product stock quantities to zero\n` +
+      `✅ Creates inventory adjustment records\n` +
+      `✅ Keeps all product names and details\n` +
+      `⚠️ CANNOT BE UNDONE!\n\n` +
+      `Type "RESET ALL STOCK" to confirm:`
+    
+    const userInput = prompt(confirmMessage)
+    if (userInput !== 'RESET ALL STOCK') {
+      if (userInput !== null) {
+        toast.error('Reset cancelled. You must type exactly "RESET ALL STOCK" to confirm.')
+      }
+      return
+    }
+
+    try {
+      const response = await productsAPI.resetAllStock()
+      if (response?.success) {
+        const updatedCount = response.data?.productsUpdated || 0
+        toast.success(`Stock reset complete! ${updatedCount} products set to zero stock.`, { duration: 5000 })
+        await loadProducts() // Refresh to show updated stock
+      } else {
+        toast.error(response?.message || 'Failed to reset stock')
+      }
+    } catch (error) {
+      console.error('Reset stock error:', error)
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to reset stock'
+      toast.error(`Reset failed: ${errorMsg}`)
+    }
+  }
+
   const tabs = [
     { id: 'all', label: 'All Products', icon: Package },
     { id: 'lowStock', label: 'Low Stock', icon: AlertTriangle, badge: products.filter(p => p.stockQty <= (p.reorderLevel || 0)).length }
@@ -280,6 +314,15 @@ const ProductsPage = () => {
             >
               <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4 sm:mr-2" />
               <span className="hidden sm:inline">Refresh</span>
+            </button>
+            <button
+              onClick={handleResetAllStock}
+              className="inline-flex items-center justify-center px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 border border-red-300 rounded-lg shadow-sm text-xs sm:text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 transition-colors flex-1 sm:flex-none"
+              title="Reset all product stock to zero (Admin only)"
+            >
+              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Reset Stock</span>
+              <span className="sm:hidden">Reset</span>
             </button>
             <button
               onClick={() => setShowImportModal(true)}
