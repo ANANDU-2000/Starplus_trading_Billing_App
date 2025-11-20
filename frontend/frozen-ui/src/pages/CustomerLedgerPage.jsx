@@ -1446,14 +1446,27 @@ const CustomerLedgerPage = () => {
                   {/* Action Buttons - Compact */}
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {selectedCustomer.id !== 'cash' && (
-                      <button
-                        onClick={() => setShowPaymentModal(true)}
-                        className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
-                        title="Add Payment (F4)"
-                      >
-                        <Plus className="h-3 w-3" />
-                        <span className="hidden sm:inline">Payment</span>
-                      </button>
+                      <>
+                        <button
+                          onClick={() => {
+                            // Navigate to customers page with edit mode
+                            navigate(`/customers?edit=${selectedCustomer.id}`)
+                          }}
+                          className="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 flex items-center gap-1 transition-colors"
+                          title="Edit Customer (F3)"
+                        >
+                          <Edit className="h-3 w-3" />
+                          <span className="hidden sm:inline">Edit</span>
+                        </button>
+                        <button
+                          onClick={() => setShowPaymentModal(true)}
+                          className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
+                          title="Add Payment (F4)"
+                        >
+                          <Plus className="h-3 w-3" />
+                          <span className="hidden sm:inline">Payment</span>
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={handleExportStatement}
