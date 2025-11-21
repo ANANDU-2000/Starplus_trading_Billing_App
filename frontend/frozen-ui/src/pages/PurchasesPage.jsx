@@ -406,8 +406,8 @@ const PurchasesPage = () => {
                       <tr>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">SL</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Description</th>
-                        <th className="px-2 py-2 border-r border-lime-300 text-left">Unit</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Qty</th>
+                        <th className="px-2 py-2 border-r border-lime-300 text-left">Unit</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Unit Cost</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Subtotal</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">VAT (5%)</th>
