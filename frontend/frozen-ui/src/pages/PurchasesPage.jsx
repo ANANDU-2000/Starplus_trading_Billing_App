@@ -433,6 +433,16 @@ const PurchasesPage = () => {
                               </div>
                             </td>
                             <td className="px-2 py-2 border-r border-lime-200">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="w-20 px-1 py-1 border border-lime-300 rounded text-xs"
+                                value={item.qty === '' ? '' : item.qty}
+                                onChange={(e) => updateItem(index, 'qty', e.target.value)}
+                              />
+                            </td>
+                            <td className="px-2 py-2 border-r border-lime-200">
                               <select
                                 className="w-full px-1 py-1 border border-lime-300 rounded text-xs uppercase"
                                 value={item.unitType || 'CRTN'}
@@ -451,16 +461,6 @@ const PurchasesPage = () => {
                                 <option value="LTR">LTR</option>
                                 <option value="MTR">MTR</option>
                               </select>
-                            </td>
-                            <td className="px-2 py-2 border-r border-lime-200">
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                className="w-20 px-1 py-1 border border-lime-300 rounded text-xs"
-                                value={item.qty === '' ? '' : item.qty}
-                                onChange={(e) => updateItem(index, 'qty', e.target.value)}
-                              />
                             </td>
                             <td className="px-2 py-2 border-r border-lime-200">
                               <input
