@@ -1274,72 +1274,103 @@ namespace FrozenApi.Services
                 saleForUpdate.Version = newVersion;
                 saleForUpdate.EditReason = editReason;
                 // InvoiceNo is NOT updated - preserve original invoice number
-                // Update CustomerId if changed - validate customer exists
-                if (request.CustomerId.HasValue)
-                {
-                    var newCustomer = await _context.Customers.FindAsync(request.CustomerId.Value);
-                    if (newCustomer == null)
-                    {
-                        throw new InvalidOperationException($"Customer with ID {request.CustomerId.Value} not found");
-                    }
-                    
-                    // If customer changed, update customer balances
-                    if (saleForUpdate.CustomerId != request.CustomerId.Value)
-                    {
-                        // Remove balance from old customer
-                        if (saleForUpdate.CustomerId.HasValue)
-                        {
-                            var oldCustomer = await _context.Customers.FindAsync(saleForUpdate.CustomerId.Value);
-                            if (oldCustomer != null)
-                            {
-                                oldCustomer.Balance -= (saleForUpdate.GrandTotal - saleForUpdate.PaidAmount);
-                                oldCustomer.UpdatedAt = DateTime.UtcNow;
-                            }
-                        }
-                        
-                        // Add balance to new customer
-                        newCustomer.Balance += (grandTotal - saleForUpdate.PaidAmount);
-                        newCustomer.UpdatedAt = DateTime.UtcNow;
-                    }
-                    else
-                    {
-                        // Same customer - adjust balance based on grand total change
-                        var balanceChange = grandTotal - saleForUpdate.GrandTotal;
-                        newCustomer.Balance += balanceChange;
-                        newCustomer.UpdatedAt = DateTime.UtcNow;
-                    }
-                    
-                    saleForUpdate.CustomerId = request.CustomerId.Value;
-                }
-                else if (saleForUpdate.CustomerId.HasValue)
-                {
-                    // Customer removed - adjust old customer balance
-                    var oldCustomer = await _context.Customers.FindAsync(saleForUpdate.CustomerId.Value);
-                    if (oldCustomer != null)
-                    {
-                        oldCustomer.Balance -= (saleForUpdate.GrandTotal - saleForUpdate.PaidAmount);
-                        oldCustomer.UpdatedAt = DateTime.UtcNow;
-                    }
-                    saleForUpdate.CustomerId = null;
-                }
-
+                
                 // Add new sale items
                 _context.SaleItems.AddRange(newSaleItems);
 
                 // Add inventory transactions
                 _context.InventoryTransactions.AddRange(inventoryTransactions);
 
-                // Process payments if provided
-                if (request.Payments != null && request.Payments.Any())
+                // ============================================================
+                // CRITICAL FIX: Properly handle CASH ↔ CREDIT conversion
+                // ============================================================
+                
+                // Determine if this is a CASH or CREDIT sale
+                bool isNewCashSale = !request.CustomerId.HasValue; // No customer = Cash customer
+                bool wasOldCashSale = !existingSale.CustomerId.HasValue;
+                int? oldCustomerId = existingSale.CustomerId;
+                int? newCustomerId = request.CustomerId;
+                
+                Console.WriteLine($"\n🔄 SALE UPDATE: Invoice {existingSale.InvoiceNo}");
+                Console.WriteLine($"   Old: CustomerId={oldCustomerId?.ToString() ?? "CASH"}, GrandTotal={existingSale.GrandTotal:C}, Paid={existingSale.PaidAmount:C}, Status={existingSale.PaymentStatus}");
+                Console.WriteLine($"   New: CustomerId={newCustomerId?.ToString() ?? "CASH"}, GrandTotal={grandTotal:C}");
+                
+                // Get old payments to properly reverse their effects
+                var oldPayments = await _context.Payments.Where(p => p.SaleId == saleId).ToListAsync();
+                
+                // STEP 1: Reverse ALL old invoice effects (balance + payments)
+                if (oldCustomerId.HasValue)
                 {
-                    // Delete old payments for this sale
-                    var oldPayments = await _context.Payments.Where(p => p.SaleId == saleId).ToListAsync();
-                    if (oldPayments != null && oldPayments.Any())
+                    var oldCustomer = await _context.Customers.FindAsync(oldCustomerId.Value);
+                    if (oldCustomer != null)
                     {
-                        _context.Payments.RemoveRange(oldPayments);
+                        // Remove old invoice from old customer's balance
+                        decimal oldOutstanding = existingSale.GrandTotal - existingSale.PaidAmount;
+                        oldCustomer.Balance -= oldOutstanding;
+                        oldCustomer.UpdatedAt = DateTime.UtcNow;
+                        Console.WriteLine($"   ✅ Removed old invoice from Customer {oldCustomerId}: -{oldOutstanding:C}");
                     }
+                }
+                
+                // Reverse old payment effects on customer balance (if any)
+                if (oldPayments != null && oldPayments.Any())
+                {
+                    foreach (var oldPayment in oldPayments)
+                    {
+                        if (oldPayment.Status == PaymentStatus.CLEARED && oldPayment.CustomerId.HasValue)
+                        {
+                            var customer = await _context.Customers.FindAsync(oldPayment.CustomerId.Value);
+                            if (customer != null)
+                            {
+                                // Reverse old payment: customer owes more
+                                customer.Balance += oldPayment.Amount;
+                                customer.UpdatedAt = DateTime.UtcNow;
+                                Console.WriteLine($"   ✅ Reversed old payment from Customer {oldPayment.CustomerId}: +{oldPayment.Amount:C}");
+                            }
+                        }
+                    }
+                    
+                    // Delete all old payments
+                    _context.Payments.RemoveRange(oldPayments);
+                }
 
-                    // Add new payments using EF Core (PostgreSQL compatible - NO raw SQL)
+                // STEP 2: Update CustomerId in sale
+                saleForUpdate.CustomerId = newCustomerId;
+
+                // STEP 3: Process NEW payment logic based on sale type
+                if (isNewCashSale)
+                {
+                    // ===== CASH SALE (No Customer) =====
+                    // Cash sales are ALWAYS paid immediately with cash
+                    saleForUpdate.PaymentStatus = SalePaymentStatus.Paid;
+                    saleForUpdate.PaidAmount = grandTotal;
+                    saleForUpdate.LastPaymentDate = DateTime.UtcNow;
+                    
+                    // Create automatic cash payment for cash sale
+                    var cashPayment = new Payment
+                    {
+                        SaleId = saleId,
+                        CustomerId = null, // No customer for cash sale
+                        Amount = grandTotal,
+                        Mode = PaymentMode.CASH,
+                        Reference = "CASH",
+                        Status = PaymentStatus.CLEARED,
+                        PaymentDate = DateTime.UtcNow,
+                        CreatedBy = userId,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        RowVersion = new byte[0]
+                    };
+                    _context.Payments.Add(cashPayment);
+                    
+                    Console.WriteLine($"   ✅ CASH SALE: Auto-created cash payment for {grandTotal:C}, Status=Paid");
+                }
+                else if (request.Payments != null && request.Payments.Any())
+                {
+                    // ===== CREDIT SALE with PAYMENTS =====
+                    // Customer provided, process payment records
+                    decimal totalPaidCleared = 0;
+                    
                     foreach (var p in request.Payments)
                     {
                         if (string.IsNullOrWhiteSpace(p.Method))
@@ -1388,34 +1419,70 @@ namespace FrozenApi.Services
                         };
                         
                         _context.Payments.Add(payment);
+                        
+                        // Track cleared payments only
+                        if (paymentStatus == PaymentStatus.CLEARED)
+                        {
+                            totalPaidCleared += p.Amount;
+                        }
                     }
                     
                     // Save all payments at once
                     await _context.SaveChangesAsync();
 
-                    // Calculate total paid from request payments
-                    var totalPaid = request.Payments.Sum(p => p.Amount);
-                    if (totalPaid >= grandTotal)
+                    // Update sale payment status based on CLEARED payments only
+                    saleForUpdate.PaidAmount = totalPaidCleared;
+                    if (totalPaidCleared >= grandTotal)
                     {
                         saleForUpdate.PaymentStatus = SalePaymentStatus.Paid;
+                        saleForUpdate.LastPaymentDate = DateTime.UtcNow;
                     }
-                    else if (totalPaid > 0)
+                    else if (totalPaidCleared > 0)
                     {
                         saleForUpdate.PaymentStatus = SalePaymentStatus.Partial;
+                        saleForUpdate.LastPaymentDate = DateTime.UtcNow;
                     }
                     else
                     {
                         saleForUpdate.PaymentStatus = SalePaymentStatus.Pending;
+                        saleForUpdate.LastPaymentDate = null;
                     }
                     
-                    // Update PaidAmount to match total paid
-                    saleForUpdate.PaidAmount = totalPaid;
+                    Console.WriteLine($"   ✅ CREDIT SALE with payments: Paid {totalPaidCleared:C} of {grandTotal:C}, Status={saleForUpdate.PaymentStatus}");
                 }
                 else
                 {
-                    // No payments provided - reset payment status
+                    // ===== CREDIT SALE with NO PAYMENTS =====
+                    // Customer owes full amount
                     saleForUpdate.PaymentStatus = SalePaymentStatus.Pending;
                     saleForUpdate.PaidAmount = 0;
+                    saleForUpdate.LastPaymentDate = null;
+                    
+                    Console.WriteLine($"   ✅ CREDIT SALE (unpaid): Outstanding {grandTotal:C}, Status=Pending");
+                }
+                
+                // STEP 4: Add new invoice to new customer's balance (if credit sale)
+                if (newCustomerId.HasValue)
+                {
+                    var newCustomer = await _context.Customers.FindAsync(newCustomerId.Value);
+                    if (newCustomer == null)
+                    {
+                        throw new InvalidOperationException($"Customer with ID {newCustomerId.Value} not found");
+                    }
+                    
+                    // Add new invoice outstanding to customer balance
+                    decimal newOutstanding = grandTotal - saleForUpdate.PaidAmount;
+                    newCustomer.Balance += newOutstanding;
+                    newCustomer.LastActivity = DateTime.UtcNow;
+                    newCustomer.UpdatedAt = DateTime.UtcNow;
+                    
+                    // Apply new cleared payments to customer balance
+                    if (saleForUpdate.PaidAmount > 0)
+                    {
+                        newCustomer.Balance -= saleForUpdate.PaidAmount;
+                    }
+                    
+                    Console.WriteLine($"   ✅ Added new invoice to Customer {newCustomerId}: +{newOutstanding:C}, Payments: -{saleForUpdate.PaidAmount:C}");
                 }
 
                 // Recalculate customer balance with new amount
