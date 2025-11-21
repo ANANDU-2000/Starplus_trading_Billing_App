@@ -538,7 +538,9 @@ const PurchasesPage = () => {
                     <th className="px-3 py-2 border-r border-lime-300 text-left">Invoice No</th>
                     <th className="px-3 py-2 border-r border-lime-300 text-left">Supplier</th>
                     <th className="px-3 py-2 border-r border-lime-300 text-left">Date</th>
-                    <th className="px-3 py-2 border-r border-lime-300 text-right">Amount</th>
+                    <th className="px-3 py-2 border-r border-lime-300 text-right">Subtotal</th>
+                    <th className="px-3 py-2 border-r border-lime-300 text-right">VAT (5%)</th>
+                    <th className="px-3 py-2 border-r border-lime-300 text-right">Total</th>
                     <th className="px-3 py-2 border-r border-lime-300 text-center">Items</th>
                     <th className="px-3 py-2 text-center">Actions</th>
                   </tr>
@@ -546,7 +548,7 @@ const PurchasesPage = () => {
                 <tbody className="divide-y divide-lime-200">
                   {purchases.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
                         No purchases found. Create a new purchase.
                       </td>
                     </tr>
@@ -556,7 +558,21 @@ const PurchasesPage = () => {
                         <td className="px-3 py-2 font-medium">{purchase.invoiceNo}</td>
                         <td className="px-3 py-2">{purchase.supplierName}</td>
                         <td className="px-3 py-2">{new Date(purchase.purchaseDate).toLocaleDateString('en-GB')}</td>
-                        <td className="px-3 py-2 text-right font-medium">AED {purchase.totalAmount.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {purchase.subtotal ? (
+                            <span className="text-gray-700">AED {purchase.subtotal.toFixed(2)}</span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {purchase.vatTotal ? (
+                            <span className="text-orange-600 font-medium">AED {purchase.vatTotal.toFixed(2)}</span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold text-green-700">AED {purchase.totalAmount.toFixed(2)}</td>
                         <td className="px-3 py-2 text-center">{purchase.items?.length || 0}</td>
                         <td className="px-3 py-2">
                           <div className="flex justify-center space-x-2">

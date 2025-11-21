@@ -87,7 +87,12 @@ namespace FrozenApi.Data
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.InvoiceNo).IsRequired().HasMaxLength(100);
                 entity.HasIndex(e => e.InvoiceNo).IsUnique();
+                
+                // VAT TRACKING FIELDS (nullable for backward compatibility)
+                entity.Property(e => e.Subtotal).HasColumnType("decimal(18,2)").IsRequired(false);
+                entity.Property(e => e.VatTotal).HasColumnType("decimal(18,2)").IsRequired(false);
                 entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+                
                 entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy);
             });
 
@@ -98,6 +103,11 @@ namespace FrozenApi.Data
                 entity.Property(e => e.UnitType).IsRequired().HasMaxLength(20);
                 entity.Property(e => e.Qty).HasColumnType("decimal(18,2)");
                 entity.Property(e => e.UnitCost).HasColumnType("decimal(18,2)");
+                
+                // VAT TRACKING FIELDS (nullable for backward compatibility)
+                entity.Property(e => e.UnitCostExclVat).HasColumnType("decimal(18,2)").IsRequired(false);
+                entity.Property(e => e.VatAmount).HasColumnType("decimal(18,2)").IsRequired(false);
+                
                 entity.Property(e => e.LineTotal).HasColumnType("decimal(18,2)");
                 entity.HasOne(e => e.Purchase).WithMany(p => p.Items).HasForeignKey(e => e.PurchaseId);
                 entity.HasOne(e => e.Product).WithMany().HasForeignKey(e => e.ProductId);

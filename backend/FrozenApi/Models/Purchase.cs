@@ -24,7 +24,12 @@ namespace FrozenApi.Models
         public string? ExpenseCategory { get; set; } // Track purchase expense type (e.g., "Inventory", "Supplies", "Equipment")
         
         public DateTime PurchaseDate { get; set; }
-        public decimal TotalAmount { get; set; }
+        
+        // VAT TRACKING FIELDS (Added for accurate profit calculations)
+        public decimal? Subtotal { get; set; } // Amount before VAT (nullable for backward compatibility)
+        public decimal? VatTotal { get; set; } // VAT amount (5% in UAE, nullable for backward compatibility)
+        public decimal TotalAmount { get; set; } // Grand total (Subtotal + VAT) - kept for backward compatibility
+        
         public string? InvoiceFilePath { get; set; }
         public string? InvoiceFileName { get; set; }
         public int CreatedBy { get; set; }
@@ -44,8 +49,13 @@ namespace FrozenApi.Models
         [MaxLength(20)]
         public string UnitType { get; set; } = "CRTN";
         public decimal Qty { get; set; }
-        public decimal UnitCost { get; set; }
-        public decimal LineTotal { get; set; }
+        public decimal UnitCost { get; set; } // Cost per unit INCLUDING VAT (for backward compatibility)
+        
+        // VAT TRACKING FIELDS (Added for accurate cost tracking)
+        public decimal? UnitCostExclVat { get; set; } // Cost per unit EXCLUDING VAT (nullable for backward compatibility)
+        public decimal? VatAmount { get; set; } // VAT amount for this line (nullable for backward compatibility)
+        
+        public decimal LineTotal { get; set; } // Total INCLUDING VAT (for backward compatibility)
 
         // Navigation properties
         public virtual Purchase Purchase { get; set; } = null!;

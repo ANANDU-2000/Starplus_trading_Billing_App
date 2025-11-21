@@ -57,12 +57,15 @@ namespace FrozenApi.Services
                             !si.Sale.IsDeleted)
                 .ToListAsync();
             
-            // Calculate COGS with proper unit conversion
+            // Calculate COGS with proper unit conversion and VAT handling
             var cogs = saleItems.Sum(si => {
                 // Convert sale quantity to base unit for accurate cost calculation
                 // CostPrice is already per base unit, so we need to convert sale qty to base unit
                 var conversionFactor = si.Product.ConversionToBase > 0 ? si.Product.ConversionToBase : 1;
                 var baseQty = si.Qty * conversionFactor;
+                
+                // CRITICAL: Use CostPrice which should already be VAT-excluded
+                // After purchase VAT fix, CostPrice will be the actual cost without VAT
                 return baseQty * si.Product.CostPrice;
             });
 

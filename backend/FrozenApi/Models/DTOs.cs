@@ -258,6 +258,11 @@ namespace FrozenApi.Models
         [Required]
         public DateTime PurchaseDate { get; set; }
         public string? ExpenseCategory { get; set; } // Optional expense category (e.g., "Inventory", "Supplies", "Equipment")
+        
+        // VAT HANDLING (Optional - if not provided, system will auto-calculate assuming costs include VAT)
+        public bool? IncludesVat { get; set; } // True if costs include VAT, False if VAT should be added, Null for auto-detection
+        public decimal? VatPercent { get; set; } // VAT percentage (default 5% for UAE)
+        
         [Required]
         public List<PurchaseItemRequest> Items { get; set; } = new();
     }
@@ -271,7 +276,7 @@ namespace FrozenApi.Models
         [Required]
         public decimal Qty { get; set; }
         [Required]
-        public decimal UnitCost { get; set; }
+        public decimal UnitCost { get; set; } // Default: cost INCLUDING VAT (unless IncludesVat=false in parent)
     }
 
     // Customer DTOs

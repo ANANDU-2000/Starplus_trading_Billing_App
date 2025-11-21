@@ -46,6 +46,8 @@ namespace FrozenApi.Services
                     InvoiceNo = p.InvoiceNo,
                     PurchaseDate = p.PurchaseDate,
                     ExpenseCategory = p.ExpenseCategory,
+                    Subtotal = p.Subtotal,
+                    VatTotal = p.VatTotal,
                     TotalAmount = p.TotalAmount,
                     Items = p.Items.Select(i => new PurchaseItemDto
                     {
@@ -55,6 +57,8 @@ namespace FrozenApi.Services
                         UnitType = i.UnitType,
                         Qty = i.Qty,
                         UnitCost = i.UnitCost,
+                        UnitCostExclVat = i.UnitCostExclVat,
+                        VatAmount = i.VatAmount,
                         LineTotal = i.LineTotal
                     }).ToList()
                 })
@@ -86,6 +90,8 @@ namespace FrozenApi.Services
                 InvoiceNo = purchase.InvoiceNo,
                 PurchaseDate = purchase.PurchaseDate,
                 ExpenseCategory = purchase.ExpenseCategory,
+                Subtotal = purchase.Subtotal,
+                VatTotal = purchase.VatTotal,
                 TotalAmount = purchase.TotalAmount,
                 Items = purchase.Items.Select(i => new PurchaseItemDto
                 {
@@ -95,6 +101,8 @@ namespace FrozenApi.Services
                     UnitType = i.UnitType,
                     Qty = i.Qty,
                     UnitCost = i.UnitCost,
+                    UnitCostExclVat = i.UnitCostExclVat,
+                    VatAmount = i.VatAmount,
                     LineTotal = i.LineTotal
                 }).ToList()
             };
@@ -146,7 +154,13 @@ namespace FrozenApi.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-
+                // VAT CALCULATION LOGIC
+                // Default: Assume costs INCLUDE VAT (backward compatible)
+                bool includesVat = request.IncludesVat ?? true; // Default true for UAE purchases
+                decimal vatPercent = request.VatPercent ?? 5m; // Default 5% VAT for UAE
+                
+                decimal subtotal = 0;
+                decimal vatTotal = 0;
                 decimal totalAmount = 0;
                 var purchaseItems = new List<PurchaseItem>();
                 var inventoryTransactions = new List<InventoryTransaction>();
@@ -170,7 +184,33 @@ namespace FrozenApi.Services
                     if (item.UnitCost < 0 || item.UnitCost > 10000000)
                         throw new InvalidOperationException($"Invalid unit cost {item.UnitCost} for product '{product.NameEn}'. Must be between 0 and 10,000,000.");
 
-                    var lineTotal = item.Qty * item.UnitCost;
+                    // CRITICAL VAT CALCULATION
+                    decimal unitCostExclVat;
+                    decimal unitCostInclVat;
+                    decimal itemVatAmount;
+                    
+                    if (includesVat)
+                    {
+                        // Cost includes VAT - need to extract VAT amount
+                        // Formula: UnitCostExclVat = UnitCost / (1 + VatPercent/100)
+                        unitCostInclVat = item.UnitCost;
+                        unitCostExclVat = item.UnitCost / (1 + (vatPercent / 100));
+                        itemVatAmount = unitCostInclVat - unitCostExclVat;
+                    }
+                    else
+                    {
+                        // Cost excludes VAT - need to add VAT
+                        unitCostExclVat = item.UnitCost;
+                        itemVatAmount = unitCostExclVat * (vatPercent / 100);
+                        unitCostInclVat = unitCostExclVat + itemVatAmount;
+                    }
+                    
+                    var lineSubtotal = item.Qty * unitCostExclVat;
+                    var lineVat = item.Qty * itemVatAmount;
+                    var lineTotal = item.Qty * unitCostInclVat;
+                    
+                    subtotal += lineSubtotal;
+                    vatTotal += lineVat;
                     totalAmount += lineTotal;
 
                     var purchaseItem = new PurchaseItem
@@ -178,7 +218,9 @@ namespace FrozenApi.Services
                         ProductId = item.ProductId,
                         UnitType = item.UnitType,
                         Qty = item.Qty,
-                        UnitCost = item.UnitCost,
+                        UnitCost = unitCostInclVat, // Store cost INCLUDING VAT for backward compatibility
+                        UnitCostExclVat = unitCostExclVat, // NEW: Cost excluding VAT
+                        VatAmount = itemVatAmount, // NEW: VAT amount per unit
                         LineTotal = lineTotal
                     };
 
@@ -188,12 +230,15 @@ namespace FrozenApi.Services
                     product.StockQty += baseQty;
                     product.UpdatedAt = DateTime.UtcNow;
                     
-                    // Update cost price if provided (use purchase cost as new cost price)
-                    if (item.UnitCost > 0)
+                    // CRITICAL: Update cost price with VAT-EXCLUDED cost
+                    // This ensures profit calculations are accurate
+                    if (unitCostExclVat > 0)
                     {
-                        // Update cost price based on base unit
-                        var costPerBaseUnit = item.UnitCost / product.ConversionToBase;
+                        // Update cost price based on base unit (EXCLUDING VAT)
+                        var costPerBaseUnit = unitCostExclVat / product.ConversionToBase;
                         product.CostPrice = costPerBaseUnit;
+                        
+                        Console.WriteLine($"📊 Product {product.NameEn}: CostPrice updated to {costPerBaseUnit:C} (excl. VAT) - was using {item.UnitCost:C} (incl. VAT)");
                     }
 
                     // Create inventory transaction
@@ -210,7 +255,8 @@ namespace FrozenApi.Services
                 }
 
                 // Log purchase creation attempt
-                Console.WriteLine($"✅ Purchase validation passed: Supplier={request.SupplierName}, Invoice={request.InvoiceNo}, Items={request.Items.Count}, Total={totalAmount:C}");
+                Console.WriteLine($"✅ Purchase validation passed: Supplier={request.SupplierName}, Invoice={request.InvoiceNo}, Items={request.Items.Count}");
+                Console.WriteLine($"💰 Subtotal={subtotal:C}, VAT={vatTotal:C} ({vatPercent}%), Total={totalAmount:C}");
                 
                 var purchase = new Purchase
                 {
@@ -218,7 +264,9 @@ namespace FrozenApi.Services
                     InvoiceNo = request.InvoiceNo,
                     PurchaseDate = request.PurchaseDate,
                     ExpenseCategory = request.ExpenseCategory, // Track expense category
-                    TotalAmount = totalAmount,
+                    Subtotal = subtotal, // NEW: Amount before VAT
+                    VatTotal = vatTotal, // NEW: VAT amount
+                    TotalAmount = totalAmount, // Grand total (for backward compatibility)
                     CreatedBy = userId,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -429,7 +477,12 @@ namespace FrozenApi.Services
         public string InvoiceNo { get; set; } = string.Empty;
         public DateTime PurchaseDate { get; set; }
         public string? ExpenseCategory { get; set; } // Expense category
-        public decimal TotalAmount { get; set; }
+            
+        // VAT FIELDS (for accurate reporting)
+        public decimal? Subtotal { get; set; } // Amount before VAT
+        public decimal? VatTotal { get; set; } // VAT amount
+        public decimal TotalAmount { get; set; } // Grand total
+            
         public List<PurchaseItemDto> Items { get; set; } = new();
     }
 
@@ -440,8 +493,10 @@ namespace FrozenApi.Services
         public string ProductName { get; set; } = string.Empty;
         public string UnitType { get; set; } = string.Empty;
         public decimal Qty { get; set; }
-        public decimal UnitCost { get; set; }
-        public decimal LineTotal { get; set; }
+        public decimal UnitCost { get; set; } // Cost INCLUDING VAT (for backward compatibility)
+        public decimal? UnitCostExclVat { get; set; } // Cost EXCLUDING VAT
+        public decimal? VatAmount { get; set; } // VAT amount for this line
+        public decimal LineTotal { get; set; } // Total INCLUDING VAT
     }
 }
 
