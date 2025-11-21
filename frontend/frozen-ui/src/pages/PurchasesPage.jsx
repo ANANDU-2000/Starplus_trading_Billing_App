@@ -409,14 +409,16 @@ const PurchasesPage = () => {
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Unit</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Qty</th>
                         <th className="px-2 py-2 border-r border-lime-300 text-left">Unit Cost</th>
-                        <th className="px-2 py-2 text-left">Amount</th>
+                        <th className="px-2 py-2 border-r border-lime-300 text-left">Subtotal</th>
+                        <th className="px-2 py-2 border-r border-lime-300 text-left">VAT (5%)</th>
+                        <th className="px-2 py-2 text-left">Total</th>
                         <th className="px-2 py-2 text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-lime-200">
                       {formData.items.length === 0 ? (
                         <tr>
-                          <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                          <td colSpan="9" className="px-4 py-8 text-center text-gray-500">
                             No items. Search and add products.
                           </td>
                         </tr>
@@ -470,7 +472,24 @@ const PurchasesPage = () => {
                                 onChange={(e) => updateItem(index, 'unitCost', e.target.value)}
                               />
                             </td>
-                            <td className="px-2 py-2 font-medium">
+                            <td className="px-2 py-2 border-r border-lime-200 text-gray-600">
+                              AED {(() => {
+                                const qty = typeof item.qty === 'number' ? item.qty : 0
+                                const cost = typeof item.unitCost === 'number' ? item.unitCost : 0
+                                const subtotal = (qty * cost) / 1.05
+                                return subtotal.toFixed(2)
+                              })()}
+                            </td>
+                            <td className="px-2 py-2 border-r border-lime-200 text-orange-600">
+                              AED {(() => {
+                                const qty = typeof item.qty === 'number' ? item.qty : 0
+                                const cost = typeof item.unitCost === 'number' ? item.unitCost : 0
+                                const subtotal = (qty * cost) / 1.05
+                                const vat = (qty * cost) - subtotal
+                                return vat.toFixed(2)
+                              })()}
+                            </td>
+                            <td className="px-2 py-2 font-bold text-green-700">
                               AED {(() => {
                                 const qty = typeof item.qty === 'number' ? item.qty : 0
                                 const cost = typeof item.unitCost === 'number' ? item.unitCost : 0
@@ -492,8 +511,16 @@ const PurchasesPage = () => {
                     </tbody>
                     <tfoot className="bg-lime-100">
                       <tr>
-                        <td colSpan="5" className="px-2 py-2 text-right font-bold border-r border-lime-300">Total:</td>
-                        <td className="px-2 py-2 font-bold text-green-700">AED {calculateTotal().toFixed(2)}</td>
+                        <td colSpan="5" className="px-2 py-2 text-right font-bold border-r border-lime-300">Totals:</td>
+                        <td className="px-2 py-2 font-bold text-gray-700 border-r border-lime-300">
+                          AED {(calculateTotal() / 1.05).toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2 font-bold text-orange-600 border-r border-lime-300">
+                          AED {(calculateTotal() - (calculateTotal() / 1.05)).toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2 font-bold text-green-700">
+                          AED {calculateTotal().toFixed(2)}
+                        </td>
                         <td></td>
                       </tr>
                     </tfoot>
