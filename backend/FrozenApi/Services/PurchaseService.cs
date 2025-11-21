@@ -155,8 +155,9 @@ namespace FrozenApi.Services
             try
             {
                 // VAT CALCULATION LOGIC
-                // Default: Assume costs INCLUDE VAT (backward compatible)
-                bool includesVat = request.IncludesVat ?? true; // Default true for UAE purchases
+                // CRITICAL: Purchase bills show Unit Cost EXCLUDING VAT (like sales invoices)
+                // Default: Costs EXCLUDE VAT (matching real purchase invoices)
+                bool includesVat = request.IncludesVat ?? false; // Changed from true to false
                 decimal vatPercent = request.VatPercent ?? 5m; // Default 5% VAT for UAE
                 
                 decimal subtotal = 0;
@@ -350,7 +351,8 @@ namespace FrozenApi.Services
                 purchase.ExpenseCategory = request.ExpenseCategory;
 
                 // VAT CALCULATION LOGIC (same as CreatePurchase)
-                bool includesVat = request.IncludesVat ?? true;
+                // CRITICAL: Purchase bills show Unit Cost EXCLUDING VAT (like sales invoices)
+                bool includesVat = request.IncludesVat ?? false; // Changed from true to false
                 decimal vatPercent = request.VatPercent ?? 5m;
                 
                 decimal subtotal = 0;

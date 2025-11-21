@@ -476,7 +476,7 @@ const PurchasesPage = () => {
                               AED {(() => {
                                 const qty = typeof item.qty === 'number' ? item.qty : 0
                                 const cost = typeof item.unitCost === 'number' ? item.unitCost : 0
-                                const subtotal = (qty * cost) / 1.05
+                                const subtotal = qty * cost
                                 return subtotal.toFixed(2)
                               })()}
                             </td>
@@ -484,8 +484,8 @@ const PurchasesPage = () => {
                               AED {(() => {
                                 const qty = typeof item.qty === 'number' ? item.qty : 0
                                 const cost = typeof item.unitCost === 'number' ? item.unitCost : 0
-                                const subtotal = (qty * cost) / 1.05
-                                const vat = (qty * cost) - subtotal
+                                const subtotal = qty * cost
+                                const vat = subtotal * 0.05
                                 return vat.toFixed(2)
                               })()}
                             </td>
@@ -493,7 +493,10 @@ const PurchasesPage = () => {
                               AED {(() => {
                                 const qty = typeof item.qty === 'number' ? item.qty : 0
                                 const cost = typeof item.unitCost === 'number' ? item.unitCost : 0
-                                return (qty * cost).toFixed(2)
+                                const subtotal = qty * cost
+                                const vat = subtotal * 0.05
+                                const total = subtotal + vat
+                                return total.toFixed(2)
                               })()}
                             </td>
                             <td className="px-2 py-2 text-center">
@@ -513,13 +516,13 @@ const PurchasesPage = () => {
                       <tr>
                         <td colSpan="5" className="px-2 py-2 text-right font-bold border-r border-lime-300">Totals:</td>
                         <td className="px-2 py-2 font-bold text-gray-700 border-r border-lime-300">
-                          AED {(calculateTotal() / 1.05).toFixed(2)}
+                          AED {calculateTotal().toFixed(2)}
                         </td>
                         <td className="px-2 py-2 font-bold text-orange-600 border-r border-lime-300">
-                          AED {(calculateTotal() - (calculateTotal() / 1.05)).toFixed(2)}
+                          AED {(calculateTotal() * 0.05).toFixed(2)}
                         </td>
                         <td className="px-2 py-2 font-bold text-green-700">
-                          AED {calculateTotal().toFixed(2)}
+                          AED {(calculateTotal() * 1.05).toFixed(2)}
                         </td>
                         <td></td>
                       </tr>
