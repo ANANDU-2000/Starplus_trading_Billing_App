@@ -55,7 +55,12 @@ public class DashboardController : ControllerBase
         decimal? profitToday = null;
         if (isAdmin)
         {
-            // Profit = Sales - COGS (Cost of Goods Sold) - Expenses
+            // Profit = Sales (Subtotal) - COGS (Cost of Goods Sold) - Expenses
+            // CRITICAL: Use Subtotal for profit calc (VAT should not be included in profit)
+            var totalSalesSubtotal = await _context.Sales
+                .Where(s => !s.IsDeleted && s.InvoiceDate >= startOfDayUtc && s.InvoiceDate <= endOfDayUtc)
+                .SumAsync(s => (decimal?)s.Subtotal) ?? 0;
+            
             // Calculate the actual cost of goods sold for today's sales
             var salesItems = await _context.SaleItems
                 .Include(si => si.Product)
@@ -65,9 +70,16 @@ public class DashboardController : ControllerBase
                             !si.Sale.IsDeleted)
                 .ToListAsync();
 
-            var costOfGoodsSold = salesItems.Sum(si => si.Qty * si.Product.CostPrice);
-            var grossProfit = totalSales - costOfGoodsSold;
+            // COGS = Sum of (Qty * ConversionToBase * CostPrice)
+            var costOfGoodsSold = salesItems.Sum(si => {
+                var baseQty = si.Qty * (si.Product.ConversionToBase > 0 ? si.Product.ConversionToBase : 1);
+                return baseQty * si.Product.CostPrice;
+            });
+            
+            var grossProfit = totalSalesSubtotal - costOfGoodsSold;
             profitToday = grossProfit - totalExpenses;
+            
+            Console.WriteLine($"📊 Dashboard Profit: Sales (GrandTotal)={totalSales:C}, Sales (Subtotal)={totalSalesSubtotal:C}, COGS={costOfGoodsSold:C}, Expenses={totalExpenses:C}, Net Profit={profitToday:C}");
         }
 
         // Pending Bills Count (sales where PaymentStatus is Pending or Partial, excluding deleted)

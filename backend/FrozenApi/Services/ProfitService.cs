@@ -129,18 +129,18 @@ namespace FrozenApi.Services
                 currentDate = currentDate.AddDays(1);
             }
 
-            Console.WriteLine($"✅ Profit Calculation: Sales={totalSales:C}, COGS={cogs:C}, Expenses={totalExpenses:C}, Net Profit={netProfit:C}");
+            Console.WriteLine($"✅ Profit Calculation: Sales (GrandTotal)={totalSales:C}, Sales (Subtotal)={totalSalesSubtotal:C}, VAT={totalSalesVat:C}, COGS={cogs:C}, Expenses={totalExpenses:C}, Net Profit={netProfit:C}");
             Console.WriteLine($"✅ Daily Profit entries: {dailyProfit.Count} days");
 
             return new ProfitReportDto
             {
                 FromDate = from,
                 ToDate = toDate,
-                TotalSales = totalSalesSubtotal, // Use subtotal for profit calculation
+                TotalSales = totalSales, // CRITICAL FIX: Use GrandTotal (with VAT) to match dashboard
                 TotalSalesVat = totalSalesVat,
-                TotalSalesWithVat = totalSales, // GrandTotal includes VAT
+                TotalSalesWithVat = totalSales, // Same as TotalSales (GrandTotal includes VAT)
                 CostOfGoodsSold = cogs,
-                GrossProfit = grossProfit,
+                GrossProfit = grossProfit, // Gross Profit = Subtotal - COGS (VAT-excluded calculation)
                 GrossProfitMargin = grossProfitMargin,
                 TotalExpenses = totalExpenses,
                 NetProfit = netProfit,
