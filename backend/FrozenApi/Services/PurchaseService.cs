@@ -349,8 +349,15 @@ namespace FrozenApi.Services
                 purchase.PurchaseDate = request.PurchaseDate;
                 purchase.ExpenseCategory = request.ExpenseCategory;
 
-                // Add new items and update stock
+                // VAT CALCULATION LOGIC (same as CreatePurchase)
+                bool includesVat = request.IncludesVat ?? true;
+                decimal vatPercent = request.VatPercent ?? 5m;
+                
+                decimal subtotal = 0;
+                decimal vatTotal = 0;
                 decimal totalAmount = 0;
+                
+                // Add new items and update stock
                 foreach (var item in request.Items)
                 {
                     var product = await _context.Products.FindAsync(item.ProductId);
@@ -358,7 +365,31 @@ namespace FrozenApi.Services
                         throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
 
                     var baseQty = item.Qty * product.ConversionToBase;
-                    var lineTotal = item.Qty * item.UnitCost;
+                    
+                    // CRITICAL VAT CALCULATION
+                    decimal unitCostExclVat;
+                    decimal unitCostInclVat;
+                    decimal itemVatAmount;
+                    
+                    if (includesVat)
+                    {
+                        unitCostInclVat = item.UnitCost;
+                        unitCostExclVat = item.UnitCost / (1 + (vatPercent / 100));
+                        itemVatAmount = unitCostInclVat - unitCostExclVat;
+                    }
+                    else
+                    {
+                        unitCostExclVat = item.UnitCost;
+                        itemVatAmount = unitCostExclVat * (vatPercent / 100);
+                        unitCostInclVat = unitCostExclVat + itemVatAmount;
+                    }
+                    
+                    var lineSubtotal = item.Qty * unitCostExclVat;
+                    var lineVat = item.Qty * itemVatAmount;
+                    var lineTotal = item.Qty * unitCostInclVat;
+                    
+                    subtotal += lineSubtotal;
+                    vatTotal += lineVat;
                     totalAmount += lineTotal;
 
                     var purchaseItem = new PurchaseItem
@@ -367,7 +398,9 @@ namespace FrozenApi.Services
                         ProductId = item.ProductId,
                         UnitType = item.UnitType,
                         Qty = item.Qty,
-                        UnitCost = item.UnitCost,
+                        UnitCost = unitCostInclVat,
+                        UnitCostExclVat = unitCostExclVat,
+                        VatAmount = itemVatAmount,
                         LineTotal = lineTotal
                     };
                     _context.PurchaseItems.Add(purchaseItem);
@@ -375,6 +408,13 @@ namespace FrozenApi.Services
                     // Update stock with new quantity
                     product.StockQty += baseQty;
                     product.UpdatedAt = DateTime.UtcNow;
+                    
+                    // CRITICAL: Update cost price with VAT-EXCLUDED cost
+                    if (unitCostExclVat > 0)
+                    {
+                        var costPerBaseUnit = unitCostExclVat / product.ConversionToBase;
+                        product.CostPrice = costPerBaseUnit;
+                    }
 
                     // Create inventory transaction
                     var inventoryTransaction = new InventoryTransaction
@@ -389,6 +429,8 @@ namespace FrozenApi.Services
                     _context.InventoryTransactions.Add(inventoryTransaction);
                 }
 
+                purchase.Subtotal = subtotal;
+                purchase.VatTotal = vatTotal;
                 purchase.TotalAmount = totalAmount;
 
                 await _context.SaveChangesAsync();
