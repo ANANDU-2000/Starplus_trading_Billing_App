@@ -79,7 +79,16 @@ public class DashboardController : ControllerBase
             var grossProfit = totalSalesSubtotal - costOfGoodsSold;
             profitToday = grossProfit - totalExpenses;
             
-            Console.WriteLine($"📊 Dashboard Profit: Sales (GrandTotal)={totalSales:C}, Sales (Subtotal)={totalSalesSubtotal:C}, COGS={costOfGoodsSold:C}, Expenses={totalExpenses:C}, Net Profit={profitToday:C}");
+            // CRITICAL LOGGING for debugging profit mismatch
+            Console.WriteLine($"\n========== DASHBOARD PROFIT CALCULATION ==========");
+            Console.WriteLine($"📊 Date Range (UTC): {startOfDayUtc:yyyy-MM-dd HH:mm:ss} to {endOfDayUtc:yyyy-MM-dd HH:mm:ss}");
+            Console.WriteLine($"💰 Sales (GrandTotal with VAT): {totalSales:C}");
+            Console.WriteLine($"💰 Sales (Subtotal, VAT-excluded): {totalSalesSubtotal:C}");
+            Console.WriteLine($"📦 COGS (Cost of Goods Sold): {costOfGoodsSold:C}");
+            Console.WriteLine($"📊 Gross Profit (Subtotal - COGS): {grossProfit:C}");
+            Console.WriteLine($"💸 Expenses: {totalExpenses:C}");
+            Console.WriteLine($"✅ NET PROFIT (Gross - Expenses): {profitToday:C}");
+            Console.WriteLine($"==================================================\n");
         }
 
         // Pending Bills Count (sales where PaymentStatus is Pending or Partial, excluding deleted)
