@@ -219,7 +219,7 @@ namespace FrozenApi.Services
                         ProductId = item.ProductId,
                         UnitType = item.UnitType,
                         Qty = item.Qty,
-                        UnitCost = unitCostInclVat, // Store cost INCLUDING VAT for backward compatibility
+                        UnitCost = item.UnitCost, // Store ORIGINAL entered cost (not calculated)
                         UnitCostExclVat = unitCostExclVat, // NEW: Cost excluding VAT
                         VatAmount = itemVatAmount, // NEW: VAT amount per unit
                         LineTotal = lineTotal
@@ -400,7 +400,7 @@ namespace FrozenApi.Services
                         ProductId = item.ProductId,
                         UnitType = item.UnitType,
                         Qty = item.Qty,
-                        UnitCost = unitCostInclVat,
+                        UnitCost = item.UnitCost, // Store ORIGINAL entered cost (not calculated)
                         UnitCostExclVat = unitCostExclVat,
                         VatAmount = itemVatAmount,
                         LineTotal = lineTotal
