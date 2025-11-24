@@ -207,7 +207,7 @@ namespace FrozenApi.Services
                                     });
                                 });
 
-                                innerColumn.Item().Border(1).Table(table =>
+                                innerColumn.Item().Border(0.5f).Table(table =>
                                 {
                                     // Column widths matching RAFCO 11: balanced equal widths
                                     table.ColumnsDefinition(columns =>
@@ -226,18 +226,17 @@ namespace FrozenApi.Services
                                     {
                                         void AddHeader(string arabic, string eng)
                                         {
-                                            header.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(2).Column(col =>
+                                            header.Cell().Border(0.5f).PaddingVertical(3).PaddingHorizontal(2).Column(col =>
                                             {
                                                 if (!string.IsNullOrEmpty(arabic))
                                                 {
                                                     col.Item().AlignCenter()
                                                         .Text(arabic)
                                                         .FontSize(9)
-                                                        .Bold()
                                                         .FontFamily(_arabicFont)
                                                         .DirectionFromRightToLeft();
                                                 }
-                                                col.Item().AlignCenter().Text(eng).FontSize(9).Bold();
+                                                col.Item().AlignCenter().Text(eng).FontSize(9);
                                             });
                                         }
 
@@ -252,66 +251,72 @@ namespace FrozenApi.Services
                                     });
 
                                     int itemCount = sale.Items != null ? sale.Items.Count : 0;
+                                    
+                                    // Calculate minimum rows needed to maintain original table height (15 rows worth of space)
+                                    int minRowsForHeight = 15;
+                                    float rowHeight = 25f; // Approximate height per row in points
+                                    float totalItemsHeight = itemCount * rowHeight;
+                                    float minTableHeight = minRowsForHeight * rowHeight;
+                                    
                                     if (itemCount > 0 && sale.Items != null)
                                     {
                                         for (int i = 0; i < itemCount; i++)
                                         {
                                             var item = sale.Items[i];
                                             
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text((i + 1).ToString()).FontSize(9);
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(item.ProductName ?? "").FontSize(9);
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(item.Qty.ToString("0.##")).FontSize(9);
+                                            // Add vertical borders between columns, no horizontal borders between rows
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text((i + 1).ToString()).FontSize(9);
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(item.ProductName ?? "").FontSize(9);
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(item.Qty.ToString("0.##")).FontSize(9);
                                             
                                             var unitTypeText = string.IsNullOrWhiteSpace(item.UnitType) ? "CRTN" : item.UnitType.ToUpper();
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(unitTypeText).FontSize(9).Bold();
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(unitTypeText).FontSize(9);
                                             
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(item.UnitPrice.ToString("0.00")).FontSize(9);
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(item.UnitPrice.ToString("0.00")).FontSize(9);
                                             
                                             var lineNet = item.Qty * item.UnitPrice;
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(lineNet.ToString("0.00")).FontSize(9);
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(item.VatAmount.ToString("0.00")).FontSize(9);
-                                            table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(1).AlignCenter().Text(item.LineTotal.ToString("0.00")).FontSize(11).Bold();
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(lineNet.ToString("0.00")).FontSize(9);
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(item.VatAmount.ToString("0.00")).FontSize(9);
+                                            table.Cell().BorderLeft(0.5f).BorderRight(0.5f).PaddingVertical(3).PaddingHorizontal(1).AlignCenter().Text(item.LineTotal.ToString("0.00")).FontSize(9);
+                                        }
+                                    }
+                                    
+                                    // Add spacer row to maintain table height if needed
+                                    if (itemCount < minRowsForHeight)
+                                    {
+                                        float spacerHeight = minTableHeight - totalItemsHeight - (3 * rowHeight); // 3 summary rows
+                                        if (spacerHeight > 0)
+                                        {
+                                            // Add spacer cells with vertical borders for each column (8 columns total)
+                                            for (int col = 0; col < 8; col++)
+                                            {
+                                                table.Cell().BorderLeft(0.5f).BorderRight(0.5f).Height(spacerHeight).Text("");
+                                            }
                                         }
                                     }
 
-                                    int maxTotalRows = 15;
-                                    int emptyRowsNeeded = Math.Max(0, maxTotalRows - itemCount);
-                                    
-                                    for (int i = 0; i < emptyRowsNeeded; i++)
-                                    {
-                                        int rowNumber = itemCount + i + 1;
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignCenter().Text(rowNumber.ToString()).FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignLeft().Text("").FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignCenter().Text("").FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignCenter().Text("").FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignRight().Text("").FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignRight().Text("0.00").FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignRight().Text("0.00").FontSize(9);
-                                        table.Cell().Border(1).PaddingVertical(2).PaddingHorizontal(1).AlignRight().Text("0.00").FontSize(9);
-                                    }
-
-                                    // Summary rows - reduced size
+                                    // Summary rows - normal formatting
                                     // Row 1: INV. Amount
-                                    table.Cell().ColumnSpan(5).Border(1).PaddingVertical(1).PaddingHorizontal(2).Row(row => {
-                                        row.AutoItem().Text("INV.Amount").FontSize(10).Bold();
+                                    table.Cell().ColumnSpan(5).Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).Row(row => {
+                                        row.AutoItem().Text("INV.Amount").FontSize(10);
                                         row.RelativeItem();
-                                        row.AutoItem().Text("إجمالي الفاتورة").FontSize(10).Bold().FontFamily(_arabicFont).DirectionFromRightToLeft();
+                                        row.AutoItem().Text("إجمالي الفاتورة").FontSize(10).FontFamily(_arabicFont).DirectionFromRightToLeft();
                                     });
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text(sale.Subtotal.ToString("0.00")).FontSize(10).Bold();
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10).Bold();
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text(sale.Subtotal.ToString("0.00")).FontSize(10);
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
                                     
                                     // Row 2: VAT 5%
-                                    table.Cell().ColumnSpan(5).Border(1).PaddingVertical(1).PaddingHorizontal(2).Row(row => {
-                                        row.AutoItem().Text("VAT 5%").FontSize(10).Bold();
+                                    table.Cell().ColumnSpan(5).Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).Row(row => {
+                                        row.AutoItem().Text("VAT 5%").FontSize(10);
                                         row.RelativeItem();
-                                        row.AutoItem().Text("ضريبة القيمة المضافة").FontSize(10).Bold().FontFamily(_arabicFont).DirectionFromRightToLeft();
+                                        row.AutoItem().Text("ضريبة القيمة المضافة").FontSize(10).FontFamily(_arabicFont).DirectionFromRightToLeft();
                                     });
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text(sale.VatTotal.ToString("0.00")).FontSize(10).Bold();
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text(sale.VatTotal.ToString("0.00")).FontSize(10);
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
                                     
-                                    // Row 3: Total Amount - FIXED with shorter amount in words display
+                                    // Row 3: Total Amount
                                     var amountInWords = ConvertToWords(sale.GrandTotal);
                                     // Shorten amount in words if too long
                                     if (amountInWords.Length > 80)
@@ -319,40 +324,39 @@ namespace FrozenApi.Services
                                         amountInWords = amountInWords.Substring(0, 77) + "...";
                                     }
                                     
-                                    table.Cell().ColumnSpan(6).Border(1).PaddingVertical(1).PaddingHorizontal(2).Text(text => {
-                                        text.Span("Total Amount ").FontSize(10).Bold();
-                                        text.Span("............. ").FontSize(9);
+                                    table.Cell().ColumnSpan(6).Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).Text(text => {
+                                        text.Span("Total Amount ").FontSize(10);
+                                        text.Span("............. ").FontSize(8);
                                         text.Span(amountInWords).FontSize(8).Italic();
-                                        text.Span(" ............. ").FontSize(9);
-                                        text.Span(" المجموع").FontSize(10).Bold().FontFamily(_arabicFont).DirectionFromRightToLeft();
+                                        text.Span(" ............. ").FontSize(8);
+                                        text.Span(" المجموع").FontSize(10).FontFamily(_arabicFont).DirectionFromRightToLeft();
                                     });
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
-                                    table.Cell().Border(1).PaddingVertical(1).PaddingHorizontal(2).AlignCenter().Text(sale.GrandTotal.ToString("0.00")).FontSize(10).Bold();
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
+                                    table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text(sale.GrandTotal.ToString("0.00")).FontSize(10);
                                 });
 
-                                // Footer Section - increased size and bold
-                                innerColumn.Item().PaddingTop(3).Column(footerCol =>
+                                // Footer Section - optimized
+                                innerColumn.Item().PaddingTop(2).Column(footerCol =>
                                 {
                                     // Acknowledgement text
                                     footerCol.Item().AlignLeft().Text("Received the above goods in good order")
-                                        .FontSize(10)
-                                        .Bold();
+                                        .FontSize(9);
 
                                     // Signature section - two columns
-                                    footerCol.Item().PaddingTop(4).Row(sigRow =>
+                                    footerCol.Item().PaddingTop(3).Row(sigRow =>
                                     {
                                         // Left column: Receiver's info
                                         sigRow.RelativeItem().Column(leftCol => {
-                                            leftCol.Item().Text("Receive's Name").FontSize(10).Bold();
-                                            leftCol.Item().PaddingTop(1).Text(new string('.', 40)).FontSize(9);
-                                            leftCol.Item().PaddingTop(3).Text("Receiver's Sign").FontSize(10).Bold();
-                                            leftCol.Item().PaddingTop(1).Text(new string('.', 40)).FontSize(9);
+                                            leftCol.Item().Text("Receive's Name").FontSize(9);
+                                            leftCol.Item().PaddingTop(1).Text(new string('.', 40)).FontSize(8);
+                                            leftCol.Item().PaddingTop(2).Text("Receiver's Sign").FontSize(9);
+                                            leftCol.Item().PaddingTop(1).Text(new string('.', 40)).FontSize(8);
                                         });
                                         
                                         // Right column: Company name
                                         sigRow.RelativeItem().Column(rightCol => {
-                                            rightCol.Item().AlignRight().Text($"For {settings.CompanyNameEn}").FontSize(10).Bold();
-                                            rightCol.Item().PaddingTop(2).AlignRight().Text(new string('.', 40)).FontSize(9);
+                                            rightCol.Item().AlignRight().Text($"For {settings.CompanyNameEn}").FontSize(9);
+                                            rightCol.Item().PaddingTop(1).AlignRight().Text(new string('.', 40)).FontSize(8);
                                         });
                                     });
                                 });
