@@ -31,11 +31,15 @@ namespace FrozenApi.Controllers
         [HttpGet]
         public async Task<ActionResult<ApiResponse<PagedResponse<PurchaseDto>>>> GetPurchases(
             [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] string? supplierName = null,
+            [FromQuery] string? category = null)
         {
             try
             {
-                var result = await _purchaseService.GetPurchasesAsync(page, pageSize);
+                var result = await _purchaseService.GetPurchasesAsync(page, pageSize, startDate, endDate, supplierName, category);
                 return Ok(new ApiResponse<PagedResponse<PurchaseDto>>
                 {
                     Success = true,
@@ -516,6 +520,34 @@ namespace FrozenApi.Controllers
             catch (Exception)
             {
                 return StatusCode(500);
+            }
+        }
+
+        [HttpGet("analytics")]
+        [Authorize]
+        public async Task<ActionResult<ApiResponse<object>>> GetPurchaseAnalytics(
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null)
+        {
+            try
+            {
+                var result = await _purchaseService.GetPurchaseAnalyticsAsync(startDate, endDate);
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "Analytics retrieved successfully",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Analytics retrieval error: {Message}", ex.Message);
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "Failed to retrieve analytics",
+                    Errors = new List<string> { ex.Message }
+                });
             }
         }
     }

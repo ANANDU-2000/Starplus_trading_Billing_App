@@ -250,6 +250,11 @@ export const purchasesAPI = {
     return response.data
   },
 
+  getPurchaseAnalytics: async (params = {}) => {
+    const response = await api.get('/purchases/analytics', { params })
+    return response.data
+  },
+
   getPurchase: async (id) => {
     const response = await api.get(`/purchases/${id}`)
     return response.data

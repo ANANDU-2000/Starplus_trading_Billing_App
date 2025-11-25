@@ -11,11 +11,12 @@ namespace FrozenApi.Services
 {
     public interface IPurchaseService
     {
-        Task<PagedResponse<PurchaseDto>> GetPurchasesAsync(int page = 1, int pageSize = 10);
+        Task<PagedResponse<PurchaseDto>> GetPurchasesAsync(int page = 1, int pageSize = 10, DateTime? startDate = null, DateTime? endDate = null, string? supplierName = null, string? category = null);
         Task<PurchaseDto?> GetPurchaseByIdAsync(int id);
         Task<PurchaseDto> CreatePurchaseAsync(CreatePurchaseRequest request, int userId);
         Task<PurchaseDto?> UpdatePurchaseAsync(int id, CreatePurchaseRequest request, int userId);
         Task<bool> DeletePurchaseAsync(int id, int userId);
+        Task<PurchaseAnalyticsDto> GetPurchaseAnalyticsAsync(DateTime? startDate = null, DateTime? endDate = null);
     }
 
     public class PurchaseService : IPurchaseService
@@ -27,12 +28,35 @@ namespace FrozenApi.Services
             _context = context;
         }
 
-        public async Task<PagedResponse<PurchaseDto>> GetPurchasesAsync(int page = 1, int pageSize = 10)
+        public async Task<PagedResponse<PurchaseDto>> GetPurchasesAsync(int page = 1, int pageSize = 10, DateTime? startDate = null, DateTime? endDate = null, string? supplierName = null, string? category = null)
         {
             var query = _context.Purchases
                 .Include(p => p.Items)
                     .ThenInclude(i => i.Product)
                 .AsQueryable();
+
+            // Apply date range filter
+            if (startDate.HasValue)
+            {
+                query = query.Where(p => p.PurchaseDate >= startDate.Value);
+            }
+            if (endDate.HasValue)
+            {
+                var endOfDay = endDate.Value.Date.AddDays(1).AddTicks(-1);
+                query = query.Where(p => p.PurchaseDate <= endOfDay);
+            }
+
+            // Apply supplier name filter
+            if (!string.IsNullOrWhiteSpace(supplierName))
+            {
+                query = query.Where(p => p.SupplierName.ToLower().Contains(supplierName.ToLower()));
+            }
+
+            // Apply category filter
+            if (!string.IsNullOrWhiteSpace(category))
+            {
+                query = query.Where(p => p.ExpenseCategory == category);
+            }
 
             var totalCount = await query.CountAsync();
             var purchases = await query
@@ -512,6 +536,117 @@ namespace FrozenApi.Services
                 throw;
             }
         }
+
+        public async Task<PurchaseAnalyticsDto> GetPurchaseAnalyticsAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _context.Purchases
+                .Include(p => p.Items)
+                .AsQueryable();
+
+            // Apply date filters if provided
+            if (startDate.HasValue)
+            {
+                query = query.Where(p => p.PurchaseDate >= startDate.Value);
+            }
+            if (endDate.HasValue)
+            {
+                var endOfDay = endDate.Value.Date.AddDays(1).AddTicks(-1);
+                query = query.Where(p => p.PurchaseDate <= endOfDay);
+            }
+
+            var purchases = await query.ToListAsync();
+
+            // Calculate totals
+            var totalAmount = purchases.Sum(p => p.TotalAmount);
+            var totalCount = purchases.Count;
+            var totalItems = purchases.Sum(p => p.Items.Count);
+
+            // Daily breakdown
+            var dailyStats = purchases
+                .GroupBy(p => p.PurchaseDate.Date)
+                .Select(g => new DailyPurchaseStat
+                {
+                    Date = g.Key,
+                    TotalAmount = g.Sum(p => p.TotalAmount),
+                    Count = g.Count(),
+                    ItemCount = g.Sum(p => p.Items.Count)
+                })
+                .OrderByDescending(d => d.Date)
+                .ToList();
+
+            // Supplier breakdown
+            var supplierStats = purchases
+                .GroupBy(p => p.SupplierName)
+                .Select(g => new SupplierPurchaseStat
+                {
+                    SupplierName = g.Key,
+                    TotalAmount = g.Sum(p => p.TotalAmount),
+                    Count = g.Count(),
+                    ItemCount = g.Sum(p => p.Items.Count)
+                })
+                .OrderByDescending(s => s.TotalAmount)
+                .ToList();
+
+            // Today's stats
+            var today = DateTime.UtcNow.Date;
+            var todayPurchases = purchases.Where(p => p.PurchaseDate.Date == today).ToList();
+            var todayTotal = todayPurchases.Sum(p => p.TotalAmount);
+            var todayCount = todayPurchases.Count;
+
+            // Yesterday's stats
+            var yesterday = today.AddDays(-1);
+            var yesterdayPurchases = purchases.Where(p => p.PurchaseDate.Date == yesterday).ToList();
+            var yesterdayTotal = yesterdayPurchases.Sum(p => p.TotalAmount);
+            var yesterdayCount = yesterdayPurchases.Count;
+
+            // This week's stats
+            var startOfWeek = today.AddDays(-(int)today.DayOfWeek);
+            var thisWeekPurchases = purchases.Where(p => p.PurchaseDate.Date >= startOfWeek).ToList();
+            var thisWeekTotal = thisWeekPurchases.Sum(p => p.TotalAmount);
+            var thisWeekCount = thisWeekPurchases.Count;
+
+            // Last week's stats
+            var startOfLastWeek = startOfWeek.AddDays(-7);
+            var endOfLastWeek = startOfWeek.AddDays(-1);
+            var lastWeekPurchases = purchases.Where(p => p.PurchaseDate.Date >= startOfLastWeek && p.PurchaseDate.Date <= endOfLastWeek).ToList();
+            var lastWeekTotal = lastWeekPurchases.Sum(p => p.TotalAmount);
+            var lastWeekCount = lastWeekPurchases.Count;
+
+            // Top supplier today
+            var topSupplierToday = todayPurchases
+                .GroupBy(p => p.SupplierName)
+                .Select(g => new { Supplier = g.Key, Total = g.Sum(p => p.TotalAmount) })
+                .OrderByDescending(s => s.Total)
+                .FirstOrDefault();
+
+            // Top supplier this week
+            var topSupplierWeek = thisWeekPurchases
+                .GroupBy(p => p.SupplierName)
+                .Select(g => new { Supplier = g.Key, Total = g.Sum(p => p.TotalAmount) })
+                .OrderByDescending(s => s.Total)
+                .FirstOrDefault();
+
+            return new PurchaseAnalyticsDto
+            {
+                TotalAmount = totalAmount,
+                TotalCount = totalCount,
+                TotalItems = totalItems,
+                TodayTotal = todayTotal,
+                TodayCount = todayCount,
+                YesterdayTotal = yesterdayTotal,
+                YesterdayCount = yesterdayCount,
+                ThisWeekTotal = thisWeekTotal,
+                ThisWeekCount = thisWeekCount,
+                LastWeekTotal = lastWeekTotal,
+                LastWeekCount = lastWeekCount,
+                TopSupplierToday = topSupplierToday?.Supplier,
+                TopSupplierTodayAmount = topSupplierToday?.Total ?? 0,
+                TopSupplierWeek = topSupplierWeek?.Supplier,
+                TopSupplierWeekAmount = topSupplierWeek?.Total ?? 0,
+                DailyStats = dailyStats,
+                SupplierStats = supplierStats
+            };
+        }
     }
 
     public class PurchaseDto
@@ -541,6 +676,43 @@ namespace FrozenApi.Services
         public decimal? UnitCostExclVat { get; set; } // Cost EXCLUDING VAT
         public decimal? VatAmount { get; set; } // VAT amount for this line
         public decimal LineTotal { get; set; } // Total INCLUDING VAT
+    }
+
+    public class PurchaseAnalyticsDto
+    {
+        public decimal TotalAmount { get; set; }
+        public int TotalCount { get; set; }
+        public int TotalItems { get; set; }
+        public decimal TodayTotal { get; set; }
+        public int TodayCount { get; set; }
+        public decimal YesterdayTotal { get; set; }
+        public int YesterdayCount { get; set; }
+        public decimal ThisWeekTotal { get; set; }
+        public int ThisWeekCount { get; set; }
+        public decimal LastWeekTotal { get; set; }
+        public int LastWeekCount { get; set; }
+        public string? TopSupplierToday { get; set; }
+        public decimal TopSupplierTodayAmount { get; set; }
+        public string? TopSupplierWeek { get; set; }
+        public decimal TopSupplierWeekAmount { get; set; }
+        public List<DailyPurchaseStat> DailyStats { get; set; } = new();
+        public List<SupplierPurchaseStat> SupplierStats { get; set; } = new();
+    }
+
+    public class DailyPurchaseStat
+    {
+        public DateTime Date { get; set; }
+        public decimal TotalAmount { get; set; }
+        public int Count { get; set; }
+        public int ItemCount { get; set; }
+    }
+
+    public class SupplierPurchaseStat
+    {
+        public string SupplierName { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+        public int Count { get; set; }
+        public int ItemCount { get; set; }
     }
 }
 
