@@ -119,38 +119,19 @@ namespace FrozenApi.Services
                     expensesToday = 0;
                 }
 
-                // CRITICAL: Calculate profit correctly: Sales (Subtotal, VAT-excluded) - COGS - Expenses
-                // Get sales subtotal (without VAT) for accurate profit calculation
-                var salesSubtotal = await _context.Sales
-                    .Where(s => !s.IsDeleted && s.InvoiceDate >= from && s.InvoiceDate < to)
-                    .SumAsync(s => (decimal?)s.Subtotal) ?? 0;
-                
-                // Get COGS for today's sales with proper unit conversion
-                var salesItems = await _context.SaleItems
-                    .Include(si => si.Product)
-                    .Include(si => si.Sale)
-                    .Where(si => !si.Sale.IsDeleted && si.Sale.InvoiceDate >= from && si.Sale.InvoiceDate < to)
-                    .ToListAsync();
-
-                // COGS = Sum of (Qty * ConversionToBase * CostPrice)
-                var costOfGoodsSold = salesItems.Sum(si => {
-                    var baseQty = si.Qty * (si.Product.ConversionToBase > 0 ? si.Product.ConversionToBase : 1);
-                    return baseQty * si.Product.CostPrice;
-                });
-                
-                // CRITICAL: Use Subtotal (VAT-excluded) for profit calculation
-                var grossProfit = salesSubtotal - costOfGoodsSold;
+                // SIMPLIFIED CASH PROFIT: Use total purchases for the period
+                // Gross Profit = Sales - Purchases (what client wants)
+                var grossProfit = salesToday - purchasesToday;
                 var profitToday = grossProfit - expensesToday;
                 
-                Console.WriteLine($"\n========== REPORT SERVICE PROFIT CALCULATION ==========");
+                Console.WriteLine($"\n========== REPORT SERVICE PROFIT CALCULATION (SIMPLIFIED CASH) ==========");
                 Console.WriteLine($"📊 Date Range: {from:yyyy-MM-dd HH:mm:ss} to {to:yyyy-MM-dd HH:mm:ss}");
                 Console.WriteLine($"💰 Sales (GrandTotal with VAT): {salesToday:C}");
-                Console.WriteLine($"💰 Sales (Subtotal, VAT-excluded): {salesSubtotal:C}");
-                Console.WriteLine($"📦 COGS (Cost of Goods Sold): {costOfGoodsSold:C}");
-                Console.WriteLine($"📊 Gross Profit (Subtotal - COGS): {grossProfit:C}");
+                Console.WriteLine($"📦 Purchases (with VAT): {purchasesToday:C}");
+                Console.WriteLine($"📊 Gross Profit (CASH: Sales - Purchases): {grossProfit:C}");
                 Console.WriteLine($"💸 Expenses: {expensesToday:C}");
-                Console.WriteLine($"✅ NET PROFIT (Gross - Expenses): {profitToday:C}");
-                Console.WriteLine($"==================================================\n");
+                Console.WriteLine($"✅ NET PROFIT (Cash): {profitToday:C}");
+                Console.WriteLine($"=========================================================================\n");
 
                 List<ProductDto> lowStockProducts = new List<ProductDto>();
                 try

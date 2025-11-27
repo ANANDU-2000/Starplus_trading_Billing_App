@@ -61,34 +61,24 @@ public class DashboardController : ControllerBase
                 .Where(s => !s.IsDeleted && s.InvoiceDate >= startOfDayUtc && s.InvoiceDate <= endOfDayUtc)
                 .SumAsync(s => (decimal?)s.Subtotal) ?? 0;
             
-            // Calculate the actual cost of goods sold for today's sales
-            var salesItems = await _context.SaleItems
-                .Include(si => si.Product)
-                .Include(si => si.Sale)
-                .Where(si => si.Sale.InvoiceDate >= startOfDayUtc && 
-                            si.Sale.InvoiceDate <= endOfDayUtc && 
-                            !si.Sale.IsDeleted)
-                .ToListAsync();
-
-            // COGS = Sum of (Qty * ConversionToBase * CostPrice)
-            var costOfGoodsSold = salesItems.Sum(si => {
-                var baseQty = si.Qty * (si.Product.ConversionToBase > 0 ? si.Product.ConversionToBase : 1);
-                return baseQty * si.Product.CostPrice;
-            });
+            // SIMPLIFIED CASH PROFIT: Just use total purchases for the period
+            var purchasesTodayCash = await _context.Purchases
+                .Where(p => p.PurchaseDate >= startOfDayUtc && p.PurchaseDate <= endOfDayUtc)
+                .SumAsync(p => (decimal?)p.TotalAmount) ?? 0;
             
-            var grossProfit = totalSalesSubtotal - costOfGoodsSold;
+            // Gross Profit = Sales - Purchases (simplified cash basis)
+            var grossProfit = totalSales - purchasesTodayCash;
             profitToday = grossProfit - totalExpenses;
             
             // CRITICAL LOGGING for debugging profit mismatch
-            Console.WriteLine($"\n========== DASHBOARD PROFIT CALCULATION ==========");
+            Console.WriteLine($"\n========== DASHBOARD PROFIT CALCULATION (SIMPLIFIED CASH) ==========");
             Console.WriteLine($"📊 Date Range (UTC): {startOfDayUtc:yyyy-MM-dd HH:mm:ss} to {endOfDayUtc:yyyy-MM-dd HH:mm:ss}");
             Console.WriteLine($"💰 Sales (GrandTotal with VAT): {totalSales:C}");
-            Console.WriteLine($"💰 Sales (Subtotal, VAT-excluded): {totalSalesSubtotal:C}");
-            Console.WriteLine($"📦 COGS (Cost of Goods Sold): {costOfGoodsSold:C}");
-            Console.WriteLine($"📊 Gross Profit (Subtotal - COGS): {grossProfit:C}");
+            Console.WriteLine($"📦 Purchases (with VAT): {purchasesTodayCash:C}");
+            Console.WriteLine($"📊 Gross Profit (CASH: Sales - Purchases): {grossProfit:C}");
             Console.WriteLine($"💸 Expenses: {totalExpenses:C}");
-            Console.WriteLine($"✅ NET PROFIT (Gross - Expenses): {profitToday:C}");
-            Console.WriteLine($"==================================================\n");
+            Console.WriteLine($"✅ NET PROFIT (Cash): {profitToday:C}");
+            Console.WriteLine($"====================================================================\n");
         }
 
         // Pending Bills Count (sales where PaymentStatus is Pending or Partial, excluding deleted)

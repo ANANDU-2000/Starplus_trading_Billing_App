@@ -58,15 +58,18 @@ namespace FrozenApi.Services
                 .ToListAsync();
             
             // Calculate COGS with proper unit conversion and VAT handling
+            // CRITICAL: For ACTUAL CASH PROFIT, COGS must include VAT (what you actually paid)
             var cogs = saleItems.Sum(si => {
                 // Convert sale quantity to base unit for accurate cost calculation
                 // CostPrice is already per base unit, so we need to convert sale qty to base unit
                 var conversionFactor = si.Product.ConversionToBase > 0 ? si.Product.ConversionToBase : 1;
                 var baseQty = si.Qty * conversionFactor;
                 
-                // CRITICAL: Use CostPrice which should already be VAT-excluded
-                // After purchase VAT fix, CostPrice will be the actual cost without VAT
-                return baseQty * si.Product.CostPrice;
+                // CRITICAL: CostPrice is VAT-excluded, but for cash profit we need actual cash cost
+                // Add 5% VAT to get the actual amount paid to suppliers
+                var costExclVat = baseQty * si.Product.CostPrice;
+                var cogsWithVat = costExclVat * 1.05m; // Add 5% VAT
+                return cogsWithVat;
             });
 
             // CRITICAL: Total Expenses - filter by date range
@@ -79,13 +82,17 @@ namespace FrozenApi.Services
                 .Where(p => p.PurchaseDate >= from && p.PurchaseDate <= to)
                 .SumAsync(p => (decimal?)p.TotalAmount) ?? 0;
 
-            // CRITICAL: Calculate Profits using correct formulas
-            // Gross Profit = Sales (Subtotal) - COGS
-            var grossProfit = totalSalesSubtotal - cogs;
-            // Net Profit = Gross Profit - Expenses
+            // CRITICAL: For SIMPLIFIED CASH PROFIT (what client wants)
+            // Gross Profit = Total Sales - Total Purchases (both with VAT)
+            // This shows actual cash in vs cash out, ignoring inventory valuation
+            var grossProfit = totalSales - totalPurchases;
+            
+            // Net Profit = Gross Profit - Operating Expenses
             var netProfit = grossProfit - totalExpenses;
-            var grossProfitMargin = totalSalesSubtotal > 0 ? (grossProfit / totalSalesSubtotal) * 100 : 0;
-            var netProfitMargin = totalSalesSubtotal > 0 ? (netProfit / totalSalesSubtotal) * 100 : 0;
+            
+            // Margins calculated against total revenue
+            var grossProfitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
+            var netProfitMargin = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
 
             // CRITICAL: Calculate daily profit array for chart
             var dailyProfit = new List<DailyProfitDto>();
@@ -129,18 +136,18 @@ namespace FrozenApi.Services
                 currentDate = currentDate.AddDays(1);
             }
 
-            Console.WriteLine($"✅ Profit Calculation: Sales (GrandTotal)={totalSales:C}, Sales (Subtotal)={totalSalesSubtotal:C}, VAT={totalSalesVat:C}, COGS={cogs:C}, Expenses={totalExpenses:C}, Net Profit={netProfit:C}");
+            Console.WriteLine($"✅ Profit Calculation (CASH BASIS): Sales={totalSales:C}, Purchases={totalPurchases:C}, Gross Profit={grossProfit:C}, Expenses={totalExpenses:C}, Net Profit={netProfit:C}");
             Console.WriteLine($"✅ Daily Profit entries: {dailyProfit.Count} days");
 
             return new ProfitReportDto
             {
                 FromDate = from,
                 ToDate = toDate,
-                TotalSales = totalSales, // CRITICAL FIX: Use GrandTotal (with VAT) to match dashboard
+                TotalSales = totalSales, // Total Revenue (GrandTotal with VAT)
                 TotalSalesVat = totalSalesVat,
                 TotalSalesWithVat = totalSales, // Same as TotalSales (GrandTotal includes VAT)
-                CostOfGoodsSold = cogs,
-                GrossProfit = grossProfit, // Gross Profit = Subtotal - COGS (VAT-excluded calculation)
+                CostOfGoodsSold = totalPurchases, // SIMPLIFIED: Show purchases instead of calculated COGS
+                GrossProfit = grossProfit, // SIMPLIFIED CASH PROFIT: Sales - Purchases
                 GrossProfitMargin = grossProfitMargin,
                 TotalExpenses = totalExpenses,
                 NetProfit = netProfit,
