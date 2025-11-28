@@ -30,7 +30,7 @@ import { formatCurrency, formatBalance } from '../utils/currency'
 import { LoadingCard, LoadingButton } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import Modal from '../components/Modal'
-import { customersAPI, paymentsAPI, salesAPI } from '../services'
+import { customersAPI, paymentsAPI, salesAPI, reportsAPI } from '../services'
 import { Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import PaymentModal from '../components/PaymentModal'
@@ -573,9 +573,17 @@ const CustomerLedgerPage = () => {
       setCustomerSummary(null)
       
       // Load all data in parallel
+      // CRITICAL: Use Reports API which properly filters by customerId on backend
+      // This ensures ALL customer invoices are retrieved, not just first 1000 from entire database
       const [ledgerRes, invoicesRes, outstandingRes, customerRes] = await Promise.all([
         customersAPI.getCustomerLedger(customerId),
-        salesAPI.getSales({ page: 1, pageSize: 1000, customerId }),
+        reportsAPI.getSalesReport({ 
+          page: 1, 
+          pageSize: 1000, 
+          customerId,
+          fromDate: dateRange.from,
+          toDate: dateRange.to
+        }),
         customersAPI.getOutstandingInvoices(customerId),
         customersAPI.getCustomer(customerId)
       ])
@@ -607,14 +615,8 @@ const CustomerLedgerPage = () => {
           // Ensure sale belongs to this customer
           return sale.customerId === customerId || sale.customerId === parseInt(customerId)
         })
-        // Filter by date range
-        invoicesData = validSales.filter(sale => {
-          const saleDate = new Date(sale.invoiceDate)
-          const fromDate = new Date(dateRange.from)
-          const toDate = new Date(dateRange.to)
-          toDate.setHours(23, 59, 59, 999)
-          return saleDate >= fromDate && saleDate <= toDate
-        })
+        // Backend already filters by date range, so use validSales directly
+        invoicesData = validSales
         setCustomerInvoices(invoicesData)
       }
 
