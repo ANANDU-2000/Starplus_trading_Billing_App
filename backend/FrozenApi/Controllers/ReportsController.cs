@@ -80,8 +80,11 @@ namespace FrozenApi.Controllers
         {
             try
             {
+                // CRITICAL FIX: Always add 1 day to toDate to include full day (end of day)
+                // This ensures invoices created TODAY show up in customer ledger
                 var from = fromDate ?? DateTime.Today.AddDays(-30);
-                var to = toDate ?? DateTime.Today.AddDays(1);
+                var to = (toDate ?? DateTime.Today).AddDays(1); // Always add 1 day to make inclusive
+                Console.WriteLine($"🔍 GetSalesReport: fromDate={from:yyyy-MM-dd}, toDate={to:yyyy-MM-dd}, customerId={customerId}");
                 var result = await _reportService.GetSalesReportAsync(from, to, customerId, status, page, pageSize);
                 return Ok(new ApiResponse<PagedResponse<SaleDto>>
                 {
@@ -117,8 +120,9 @@ namespace FrozenApi.Controllers
         {
             try
             {
+                // CRITICAL FIX: Always add 1 day to toDate for inclusive range
                 var from = fromDate ?? DateTime.Today.AddDays(-30);
-                var to = toDate ?? DateTime.Today.AddDays(1);
+                var to = (toDate ?? DateTime.Today).AddDays(1);
                 var result = await _reportService.GetProductSalesReportAsync(from, to, top);
                 return Ok(new ApiResponse<List<ProductSalesDto>>
                 {

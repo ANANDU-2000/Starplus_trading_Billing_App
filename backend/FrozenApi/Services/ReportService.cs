@@ -318,9 +318,13 @@ namespace FrozenApi.Services
             int page = 1, 
             int pageSize = 10)
         {
-            // Build query with filters
+            // CRITICAL FIX: Use < instead of <= for toDate comparison
+            // toDate is already +1 day from controller, so use < to include full day
+            // Example: toDate = 2025-12-11 00:00:00, so invoices on 2025-12-10 23:59:59 are included
             var query = _context.Sales
-                .Where(s => !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate);
+                .Where(s => !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate);
+            
+            Console.WriteLine($"📊 GetSalesReportAsync: fromDate={fromDate:yyyy-MM-dd HH:mm:ss}, toDate={toDate:yyyy-MM-dd HH:mm:ss}, customerId={customerId}");
             
             // Apply customer filter
             if (customerId.HasValue)
@@ -396,7 +400,7 @@ namespace FrozenApi.Services
                 // First, get the grouped sales data
                 var groupedData = await (from si in _context.SaleItems
                                         join s in _context.Sales on si.SaleId equals s.Id
-                                        where !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate
+                                        where !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate
                                         group si by si.ProductId into g
                                         select new
                                         {
@@ -730,7 +734,7 @@ namespace FrozenApi.Services
             {
                 var from = fromDate.Value.Date;
                 var toDateEnd = toDate.Value.Date.AddDays(1).AddTicks(-1);
-                salesQuery = salesQuery.Where(s => s.InvoiceDate >= from && s.InvoiceDate <= toDateEnd);
+                salesQuery = salesQuery.Where(s => s.InvoiceDate >= from && s.InvoiceDate < toDateEnd);
             }
 
             // Filter by customer
@@ -1163,7 +1167,7 @@ namespace FrozenApi.Services
             foreach (var customer in customers)
             {
                 var sales = await _context.Sales
-                    .Where(s => !s.IsDeleted && s.CustomerId == customer.Id && s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate)
+                    .Where(s => !s.IsDeleted && s.CustomerId == customer.Id && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate)
                     .ToListAsync();
 
                 var payments = await _context.Payments
@@ -1393,7 +1397,7 @@ namespace FrozenApi.Services
 
             // Get all sales (non-deleted) within date range
             var sales = await _context.Sales
-                .Where(s => !s.IsDeleted && s.InvoiceDate >= from && s.InvoiceDate <= to)
+                .Where(s => !s.IsDeleted && s.InvoiceDate >= from && s.InvoiceDate < to)
                 .OrderBy(s => s.InvoiceDate)
                 .ThenBy(s => s.Id)
                 .ToListAsync();
