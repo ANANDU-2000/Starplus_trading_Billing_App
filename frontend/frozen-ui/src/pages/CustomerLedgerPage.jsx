@@ -1531,17 +1531,6 @@ const CustomerLedgerPage = () => {
                           <span className="hidden sm:inline">Edit</span>
                         </button>
                         <button
-                          onClick={() => {
-                            setPaymentModalInvoiceId(null)
-                            setShowPaymentModal(true)
-                          }}
-                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 transition-colors"
-                          title="Add Balance/Payment Adjustment (not linked to invoice)"
-                        >
-                          <Wallet className="h-3 w-3" />
-                          <span className="hidden sm:inline">Add Balance</span>
-                        </button>
-                        <button
                           onClick={() => setShowPaymentModal(true)}
                           className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
                           title="Add Payment (F4)"
@@ -1567,11 +1556,10 @@ const CustomerLedgerPage = () => {
                             return
                           }
                           
-                          // CRITICAL: Use the date range filters from the page
                           const fromDate = dateRange.from
                           const toDate = dateRange.to
                           
-                          toast.loading(`Generating pending bills PDF for ${selectedCustomer.name}...`)
+                          const loadingToast = toast.loading('Generating PDF...')
                           const pdfBlob = await customersAPI.getCustomerPendingBillsPdf(
                             selectedCustomer.id,
                             fromDate,
@@ -1586,12 +1574,12 @@ const CustomerLedgerPage = () => {
                           a.click()
                           window.URL.revokeObjectURL(url)
                           document.body.removeChild(a)
-                          toast.dismiss()
-                          toast.success(`Pending bills PDF downloaded! (${fromDate} to ${toDate})`)
+                          toast.dismiss(loadingToast)
+                          toast.success('PDF downloaded!')
                         } catch (error) {
                           console.error('Failed to export pending bills PDF:', error)
                           toast.dismiss()
-                          toast.error(error.response?.data?.message || error.message || 'Failed to export pending bills PDF')
+                          toast.error(error.response?.data?.message || 'Failed to export PDF')
                         }
                       }}
                       className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 flex items-center gap-1 transition-colors"

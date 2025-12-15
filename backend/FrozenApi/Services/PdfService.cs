@@ -1338,13 +1338,12 @@ namespace FrozenApi.Services
                                 table.ColumnsDefinition(columns =>
                                 {
                                     columns.ConstantColumn(50); // Invoice No
-                                    columns.ConstantColumn(60); // Date
-                                    columns.ConstantColumn(60); // Due Date
+                                    columns.ConstantColumn(70); // Date
                                     columns.RelativeColumn(); // Description
-                                    columns.ConstantColumn(60); // Total
-                                    columns.ConstantColumn(60); // Paid
-                                    columns.ConstantColumn(70); // Balance
-                                    columns.ConstantColumn(40); // Days
+                                    columns.ConstantColumn(70); // Total
+                                    columns.ConstantColumn(70); // Paid
+                                    columns.ConstantColumn(80); // Balance
+                                    columns.ConstantColumn(50); // Days
                                 });
                                 
                                 // Header
@@ -1352,7 +1351,6 @@ namespace FrozenApi.Services
                                 {
                                     header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Invoice").FontSize(8).Bold().FontColor(Colors.White);
                                     header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Invoice Date").FontSize(8).Bold().FontColor(Colors.White);
-                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Due Date").FontSize(8).Bold().FontColor(Colors.White);
                                     header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Description").FontSize(8).Bold().FontColor(Colors.White);
                                     header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Total").FontSize(8).Bold().FontColor(Colors.White);
                                     header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Paid").FontSize(8).Bold().FontColor(Colors.White);
@@ -1364,14 +1362,12 @@ namespace FrozenApi.Services
                                 foreach (var invoice in outstandingInvoices)
                                 {
                                     var daysOverdue = invoice.DaysOverdue > 0 ? invoice.DaysOverdue : 0;
-                                    var dueDate = invoice.InvoiceDate.AddDays(30); // Default 30-day credit terms
                                     var rowBg = daysOverdue > 30 ? Colors.Red.Lighten4 
                                         : daysOverdue > 0 ? Colors.Orange.Lighten4 
                                         : Colors.White;
                                     
                                     table.Cell().Border(1).Background(rowBg).Padding(2).Text(invoice.InvoiceNo ?? "-").FontSize(8);
                                     table.Cell().Border(1).Background(rowBg).Padding(2).Text(invoice.InvoiceDate.ToString("dd-MM-yyyy")).FontSize(8);
-                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(dueDate.ToString("dd-MM-yyyy")).FontSize(8);
                                     table.Cell().Border(1).Background(rowBg).Padding(2).Text("Unpaid Invoice").FontSize(8);
                                     table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{invoice.GrandTotal:N2}").FontSize(8);
                                     table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{invoice.PaidAmount:N2}").FontSize(8).FontColor(Colors.Green.Medium);
@@ -1384,7 +1380,7 @@ namespace FrozenApi.Services
                                 var totalPaid = outstandingInvoices.Sum(b => b.PaidAmount);
                                 var totalBalance = outstandingInvoices.Sum(b => b.BalanceAmount);
                                 
-                                table.Cell().ColumnSpan(4).Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text("TOTAL PENDING:").FontSize(9).Bold();
+                                table.Cell().ColumnSpan(3).Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text("TOTAL PENDING:").FontSize(9).Bold();
                                 table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalGrand:N2}").FontSize(9).Bold();
                                 table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalPaid:N2}").FontSize(9).Bold().FontColor(Colors.Green.Medium);
                                 table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalBalance:N2}").FontSize(9).Bold().FontColor(Colors.Red.Medium);
