@@ -163,7 +163,9 @@ const PaymentModal = ({ isOpen, onClose, invoiceId, customerId, onPaymentSuccess
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-center gap-2">
             <Wallet className="w-5 h-5 text-green-600" />
-            <h2 className="text-xl font-semibold">Make Payment</h2>
+            <h2 className="text-xl font-semibold">
+              {invoiceId ? 'Make Payment' : 'Add Balance Adjustment'}
+            </h2>
           </div>
           <button
             onClick={onClose}

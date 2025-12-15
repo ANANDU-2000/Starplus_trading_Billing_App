@@ -1531,6 +1531,17 @@ const CustomerLedgerPage = () => {
                           <span className="hidden sm:inline">Edit</span>
                         </button>
                         <button
+                          onClick={() => {
+                            setPaymentModalInvoiceId(null)
+                            setShowPaymentModal(true)
+                          }}
+                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 transition-colors"
+                          title="Add Balance/Payment Adjustment (not linked to invoice)"
+                        >
+                          <Wallet className="h-3 w-3" />
+                          <span className="hidden sm:inline">Add Balance</span>
+                        </button>
+                        <button
                           onClick={() => setShowPaymentModal(true)}
                           className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
                           title="Add Payment (F4)"
@@ -1543,15 +1554,56 @@ const CustomerLedgerPage = () => {
                     <button
                       onClick={handleExportStatement}
                       className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 transition-colors"
-                      title="Statement (F5)"
+                      title="Ledger Statement (F5)"
                     >
                       <FileText className="h-3 w-3" />
                       <span className="hidden lg:inline">Statement</span>
                     </button>
                     <button
+                      onClick={async () => {
+                        try {
+                          if (!selectedCustomer || !selectedCustomer.id) {
+                            toast.error('Please select a customer first')
+                            return
+                          }
+                          
+                          // CRITICAL: Use the date range filters from the page
+                          const fromDate = dateRange.from
+                          const toDate = dateRange.to
+                          
+                          toast.loading(`Generating pending bills PDF for ${selectedCustomer.name}...`)
+                          const pdfBlob = await customersAPI.getCustomerPendingBillsPdf(
+                            selectedCustomer.id,
+                            fromDate,
+                            toDate
+                          )
+                          
+                          const url = window.URL.createObjectURL(pdfBlob)
+                          const a = document.createElement('a')
+                          a.href = url
+                          a.download = `Pending_Bills_${selectedCustomer.name}_${fromDate}_to_${toDate}.pdf`
+                          document.body.appendChild(a)
+                          a.click()
+                          window.URL.revokeObjectURL(url)
+                          document.body.removeChild(a)
+                          toast.dismiss()
+                          toast.success(`Pending bills PDF downloaded! (${fromDate} to ${toDate})`)
+                        } catch (error) {
+                          console.error('Failed to export pending bills PDF:', error)
+                          toast.dismiss()
+                          toast.error(error.response?.data?.message || error.message || 'Failed to export pending bills PDF')
+                        }
+                      }}
+                      className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 flex items-center gap-1 transition-colors"
+                      title="Pending Bills PDF (Outstanding Invoices Only) - Uses Date Filter"
+                    >
+                      <DollarSign className="h-3 w-3" />
+                      <span className="hidden lg:inline">Pending Bills</span>
+                    </button>
+                    <button
                       onClick={handleExportPDF}
                       className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-800 flex items-center gap-1 transition-colors"
-                      title="PDF (F7)"
+                      title="Full Ledger PDF (F7)"
                     >
                       <Download className="h-3 w-3" />
                       <span className="hidden lg:inline">PDF</span>

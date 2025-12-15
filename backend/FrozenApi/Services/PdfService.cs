@@ -1105,6 +1105,335 @@ namespace FrozenApi.Services
             return words.Trim();
         }
 
+        public async Task<byte[]> GeneratePendingBillsPdfAsync(List<PendingBillDto> pendingBills, DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                var settings = await GetCompanySettingsAsync();
+                
+                var document = Document.Create(container =>
+                {
+                    container.Page(page =>
+                    {
+                        page.Size(PageSizes.A4);
+                        page.Margin(15, Unit.Millimetre);
+                        page.PageColor(Colors.White);
+                        
+                        page.DefaultTextStyle(x => x.FontFamily(_englishFont).FontSize(10));
+
+                        page.Content().Column(column =>
+                        {
+                            // Header
+                            column.Item().AlignCenter().Text(settings.CompanyNameEn.ToUpper())
+                                .FontSize(18)
+                                .Bold();
+                            
+                            column.Item().AlignCenter().Text(settings.CompanyNameAr)
+                                .FontSize(16)
+                                .Bold()
+                                .FontFamily(_arabicFont)
+                                .DirectionFromRightToLeft();
+                            
+                            column.Item().AlignCenter().Text($"{settings.CompanyAddress} | {settings.CompanyPhone}")
+                                .FontSize(10);
+                            
+                            column.Item().AlignCenter().Text($"TRN: {settings.CompanyTrn}")
+                                .FontSize(10)
+                                .Bold();
+                            
+                            column.Item().PaddingTop(15).PaddingBottom(10).AlignCenter().Text("PENDING BILLS REPORT")
+                                .FontSize(16)
+                                .Bold();
+                            
+                            column.Item().PaddingBottom(5).Text($"Period: {fromDate:dd-MM-yyyy} to {toDate:dd-MM-yyyy}")
+                                .FontSize(10);
+                            
+                            column.Item().PaddingBottom(5).Text($"Generated: {DateTime.Now:dd-MM-yyyy HH:mm}")
+                                .FontSize(9)
+                                .FontColor(Colors.Grey.Medium);
+                            
+                            // Table
+                            column.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(columns =>
+                                {
+                                    columns.ConstantColumn(40); // Invoice No
+                                    columns.RelativeColumn(2); // Customer
+                                    columns.ConstantColumn(50); // Date
+                                    columns.ConstantColumn(50); // Due Date
+                                    columns.ConstantColumn(50); // Total
+                                    columns.ConstantColumn(50); // Paid
+                                    columns.ConstantColumn(50); // Balance
+                                    columns.ConstantColumn(35); // Days Overdue
+                                });
+                                
+                                // Header
+                                table.Header(header =>
+                                {
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Invoice").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Customer").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Invoice Date").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Due Date").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Total").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Paid").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Balance").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignCenter().Text("Overdue").FontSize(8).Bold().FontColor(Colors.White);
+                                });
+                                
+                                // Rows
+                                foreach (var bill in pendingBills)
+                                {
+                                    var rowBg = bill.DaysOverdue > 30 ? Colors.Red.Lighten4 
+                                        : bill.DaysOverdue > 0 ? Colors.Orange.Lighten4 
+                                        : Colors.White;
+                                    
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(bill.InvoiceNo ?? "-").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(bill.CustomerName ?? "Cash Customer").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(bill.InvoiceDate.ToString("dd-MM-yyyy")).FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(bill.DueDate?.ToString("dd-MM-yyyy") ?? "-").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{bill.GrandTotal:N2}").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{bill.PaidAmount:N2}").FontSize(8).FontColor(Colors.Green.Medium);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{bill.BalanceAmount:N2}").FontSize(8).Bold().FontColor(Colors.Red.Medium);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignCenter().Text(bill.DaysOverdue > 0 ? bill.DaysOverdue.ToString() : "-").FontSize(8).FontColor(bill.DaysOverdue > 30 ? Colors.Red.Darken1 : bill.DaysOverdue > 0 ? Colors.Orange.Darken1 : Colors.Grey.Medium);
+                                }
+                                
+                                // Footer Totals
+                                var totalGrand = pendingBills.Sum(b => b.GrandTotal);
+                                var totalPaid = pendingBills.Sum(b => b.PaidAmount);
+                                var totalBalance = pendingBills.Sum(b => b.BalanceAmount);
+                                
+                                table.Cell().ColumnSpan(4).Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text("TOTAL:").FontSize(9).Bold();
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalGrand:N2}").FontSize(9).Bold();
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalPaid:N2}").FontSize(9).Bold().FontColor(Colors.Green.Medium);
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalBalance:N2}").FontSize(9).Bold().FontColor(Colors.Red.Medium);
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).Text("");
+                            });
+                            
+                            // Summary Stats
+                            column.Item().PaddingTop(15).PaddingBottom(5).Row(row =>
+                            {
+                                row.RelativeItem().Text(text =>
+                                {
+                                    text.Span("Total Invoices: ").Bold();
+                                    text.Span(pendingBills.Count.ToString());
+                                });
+                                
+                                row.RelativeItem().Text(text =>
+                                {
+                                    text.Span("Overdue Invoices: ").Bold();
+                                    text.Span(pendingBills.Count(b => b.DaysOverdue > 0).ToString()).FontColor(Colors.Red.Medium);
+                                });
+                                
+                                row.RelativeItem().Text(text =>
+                                {
+                                    text.Span("Critical (>30 days): ").Bold();
+                                    text.Span(pendingBills.Count(b => b.DaysOverdue > 30).ToString()).FontColor(Colors.Red.Darken1);
+                                });
+                            });
+                        });
+                        
+                        page.Footer().AlignCenter().Text(x =>
+                        {
+                            x.CurrentPageNumber();
+                            x.Span(" / ");
+                            x.TotalPages();
+                        });
+                    });
+                });
+                
+                return document.GeneratePdf();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error generating pending bills PDF: {ex.Message}");
+                Console.WriteLine($"❌ Stack Trace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        public async Task<byte[]> GenerateCustomerPendingBillsPdfAsync(List<OutstandingInvoiceDto> outstandingInvoices, CustomerDto customer, DateTime asOfDate, DateTime fromDate, DateTime toDate)
+        {
+            try
+            {
+                var settings = await GetCompanySettingsAsync();
+                
+                var document = Document.Create(container =>
+                {
+                    container.Page(page =>
+                    {
+                        page.Size(PageSizes.A4);
+                        page.Margin(15, Unit.Millimetre);
+                        page.PageColor(Colors.White);
+                        
+                        page.DefaultTextStyle(x => x.FontFamily(_englishFont).FontSize(10));
+
+                        page.Content().Column(column =>
+                        {
+                            // Header
+                            column.Item().AlignCenter().Text(settings.CompanyNameEn.ToUpper())
+                                .FontSize(18)
+                                .Bold();
+                            
+                            column.Item().AlignCenter().Text(settings.CompanyNameAr)
+                                .FontSize(16)
+                                .Bold()
+                                .FontFamily(_arabicFont)
+                                .DirectionFromRightToLeft();
+                            
+                            column.Item().AlignCenter().Text($"{settings.CompanyAddress} | {settings.CompanyPhone}")
+                                .FontSize(10);
+                            
+                            column.Item().AlignCenter().Text($"TRN: {settings.CompanyTrn}")
+                                .FontSize(10)
+                                .Bold();
+                            
+                            column.Item().PaddingTop(15).PaddingBottom(10).AlignCenter().Text("CUSTOMER PENDING BILLS STATEMENT")
+                                .FontSize(16)
+                                .Bold();
+                            
+                            column.Item().PaddingBottom(5).AlignCenter().Text($"Period: {fromDate:dd-MM-yyyy} to {toDate:dd-MM-yyyy}")
+                                .FontSize(10)
+                                .FontColor(Colors.Grey.Darken1);
+                            
+                            // Customer Info
+                            column.Item().PaddingVertical(10).BorderTop(1).BorderBottom(1).BorderColor(Colors.Grey.Medium).Row(row =>
+                            {
+                                row.RelativeItem().Column(col =>
+                                {
+                                    col.Item().Text(text =>
+                                    {
+                                        text.Span("Customer: ").Bold();
+                                        text.Span(customer.Name);
+                                    });
+                                    col.Item().Text(text =>
+                                    {
+                                        text.Span("Phone: ").Bold();
+                                        text.Span(customer.Phone ?? "N/A");
+                                    });
+                                    col.Item().Text(text =>
+                                    {
+                                        text.Span("TRN: ").Bold();
+                                        text.Span(customer.Trn ?? "N/A");
+                                    });
+                                });
+                                
+                                row.RelativeItem().Column(col =>
+                                {
+                                    col.Item().AlignRight().Text(text =>
+                                    {
+                                        text.Span("Statement Date: ").Bold();
+                                        text.Span(asOfDate.ToString("dd-MM-yyyy"));
+                                    });
+                                    col.Item().AlignRight().Text(text =>
+                                    {
+                                        text.Span("Total Balance: ").Bold();
+                                        text.Span($"{customer.Balance:N2} AED").FontColor(customer.Balance > 0 ? Colors.Red.Medium : Colors.Green.Medium);
+                                    });
+                                });
+                            });
+                            
+                            // Table
+                            column.Item().PaddingTop(10).Table(table =>
+                            {
+                                table.ColumnsDefinition(columns =>
+                                {
+                                    columns.ConstantColumn(50); // Invoice No
+                                    columns.ConstantColumn(60); // Date
+                                    columns.ConstantColumn(60); // Due Date
+                                    columns.RelativeColumn(); // Description
+                                    columns.ConstantColumn(60); // Total
+                                    columns.ConstantColumn(60); // Paid
+                                    columns.ConstantColumn(70); // Balance
+                                    columns.ConstantColumn(40); // Days
+                                });
+                                
+                                // Header
+                                table.Header(header =>
+                                {
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Invoice").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Invoice Date").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Due Date").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).Text("Description").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Total").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Paid").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignRight().Text("Balance").FontSize(8).Bold().FontColor(Colors.White);
+                                    header.Cell().Background(Colors.Blue.Darken2).Border(1).Padding(3).AlignCenter().Text("Days").FontSize(8).Bold().FontColor(Colors.White);
+                                });
+                                
+                                // Rows
+                                foreach (var invoice in outstandingInvoices)
+                                {
+                                    var daysOverdue = invoice.DaysOverdue > 0 ? invoice.DaysOverdue : 0;
+                                    var dueDate = invoice.InvoiceDate.AddDays(30); // Default 30-day credit terms
+                                    var rowBg = daysOverdue > 30 ? Colors.Red.Lighten4 
+                                        : daysOverdue > 0 ? Colors.Orange.Lighten4 
+                                        : Colors.White;
+                                    
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(invoice.InvoiceNo ?? "-").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(invoice.InvoiceDate.ToString("dd-MM-yyyy")).FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text(dueDate.ToString("dd-MM-yyyy")).FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).Text("Unpaid Invoice").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{invoice.GrandTotal:N2}").FontSize(8);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{invoice.PaidAmount:N2}").FontSize(8).FontColor(Colors.Green.Medium);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignRight().Text($"{invoice.BalanceAmount:N2}").FontSize(8).Bold().FontColor(Colors.Red.Medium);
+                                    table.Cell().Border(1).Background(rowBg).Padding(2).AlignCenter().Text(daysOverdue > 0 ? daysOverdue.ToString() : "-").FontSize(8).FontColor(daysOverdue > 30 ? Colors.Red.Darken1 : daysOverdue > 0 ? Colors.Orange.Darken1 : Colors.Grey.Medium);
+                                }
+                                
+                                // Footer Totals
+                                var totalGrand = outstandingInvoices.Sum(b => b.GrandTotal);
+                                var totalPaid = outstandingInvoices.Sum(b => b.PaidAmount);
+                                var totalBalance = outstandingInvoices.Sum(b => b.BalanceAmount);
+                                
+                                table.Cell().ColumnSpan(4).Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text("TOTAL PENDING:").FontSize(9).Bold();
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalGrand:N2}").FontSize(9).Bold();
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalPaid:N2}").FontSize(9).Bold().FontColor(Colors.Green.Medium);
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).AlignRight().Text($"{totalBalance:N2}").FontSize(9).Bold().FontColor(Colors.Red.Medium);
+                                table.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(3).Text("");
+                            });
+                            
+                            // Summary
+                            column.Item().PaddingTop(15).Row(row =>
+                            {
+                                row.RelativeItem().Text(text =>
+                                {
+                                    text.Span("Total Pending Invoices: ").Bold();
+                                    text.Span(outstandingInvoices.Count.ToString());
+                                });
+                                
+                                row.RelativeItem().AlignRight().Text(text =>
+                                {
+                                    text.Span("Amount to Collect: ").Bold();
+                                    text.Span($"{outstandingInvoices.Sum(i => i.BalanceAmount):N2} AED").FontColor(Colors.Red.Medium).FontSize(12).Bold();
+                                });
+                            });
+                            
+                            // Footer note
+                            column.Item().PaddingTop(20).BorderTop(1).BorderColor(Colors.Grey.Medium).PaddingTop(5).Text("Please settle all outstanding invoices at your earliest convenience.")
+                                .FontSize(8)
+                                .Italic()
+                                .FontColor(Colors.Grey.Medium);
+                        });
+                        
+                        page.Footer().AlignCenter().Text(x =>
+                        {
+                            x.Span("Page ");
+                            x.CurrentPageNumber();
+                            x.Span(" of ");
+                            x.TotalPages();
+                        });
+                    });
+                });
+                
+                return document.GeneratePdf();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error generating customer pending bills PDF: {ex.Message}");
+                Console.WriteLine($"❌ Stack Trace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
     }
 }
 

@@ -861,7 +861,7 @@ namespace FrozenApi.Services
             {
                 // Group by month
                 var salesData = await _context.Sales
-                    .Where(s => s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate)
+                    .Where(s => s.InvoiceDate >= fromDate && s.InvoiceDate < toDate)
                     .GroupBy(s => new { Year = s.InvoiceDate.Year, Month = s.InvoiceDate.Month })
                     .Select(g => new
                     {
@@ -872,7 +872,7 @@ namespace FrozenApi.Services
                     .ToListAsync();
 
                 var purchasesData = await _context.Purchases
-                    .Where(p => p.PurchaseDate >= fromDate && p.PurchaseDate <= toDate)
+                    .Where(p => p.PurchaseDate >= fromDate && p.PurchaseDate < toDate)
                     .GroupBy(p => new { Year = p.PurchaseDate.Year, Month = p.PurchaseDate.Month })
                     .Select(g => new
                     {
@@ -883,7 +883,7 @@ namespace FrozenApi.Services
                     .ToListAsync();
 
                 var expensesData = await _context.Expenses
-                    .Where(e => e.Date >= fromDate && e.Date <= toDate)
+                    .Where(e => e.Date >= fromDate && e.Date < toDate)
                     .GroupBy(e => new { Year = e.Date.Year, Month = e.Date.Month })
                     .Select(g => new
                     {
@@ -921,7 +921,7 @@ namespace FrozenApi.Services
             {
                 // Group by day
                 var salesData = await _context.Sales
-                    .Where(s => s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate)
+                    .Where(s => s.InvoiceDate >= fromDate && s.InvoiceDate < toDate)
                     .GroupBy(s => s.InvoiceDate.Date)
                     .Select(g => new
                     {
@@ -932,7 +932,7 @@ namespace FrozenApi.Services
                     .ToListAsync();
 
                 var purchasesData = await _context.Purchases
-                    .Where(p => p.PurchaseDate >= fromDate && p.PurchaseDate <= toDate)
+                    .Where(p => p.PurchaseDate >= fromDate && p.PurchaseDate < toDate)
                     .GroupBy(p => p.PurchaseDate.Date)
                     .Select(g => new
                     {
@@ -943,7 +943,7 @@ namespace FrozenApi.Services
                     .ToListAsync();
 
                 var expensesData = await _context.Expenses
-                    .Where(e => e.Date >= fromDate && e.Date <= toDate)
+                    .Where(e => e.Date >= fromDate && e.Date < toDate)
                     .GroupBy(e => e.Date.Date)
                     .Select(g => new
                     {
@@ -988,7 +988,7 @@ namespace FrozenApi.Services
                 .Include(s => s.Items)
                     .ThenInclude(i => i.Product)
                 .Include(s => s.Customer)
-                .Where(s => !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate)
+                .Where(s => !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate)
                 .AsQueryable();
 
             if (productId.HasValue)
@@ -1105,7 +1105,7 @@ namespace FrozenApi.Services
             var query = from si in _context.SaleItems
                        join s in _context.Sales on si.SaleId equals s.Id
                        join p in _context.Products on si.ProductId equals p.Id
-                       where !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate <= toDate
+                       where !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate
                        select new { si, s, p };
 
             if (productId.HasValue)

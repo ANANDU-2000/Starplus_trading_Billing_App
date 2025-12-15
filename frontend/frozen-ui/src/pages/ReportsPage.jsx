@@ -1607,9 +1607,42 @@ const ReportsPage = () => {
           {activeTab === 'outstanding' && (
             <div className="space-y-6">
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gradient-to-r from-red-50 to-orange-50 px-6 py-4 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">Pending Bills & Outstanding Invoices</h3>
-                  <p className="text-sm text-gray-600 mt-1">Invoices with unpaid or partially paid balances</p>
+                <div className="bg-gradient-to-r from-red-50 to-orange-50 px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Pending Bills & Outstanding Invoices</h3>
+                    <p className="text-sm text-gray-600 mt-1">Invoices with unpaid or partially paid balances</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        toast.loading('Generating PDF...')
+                        const blob = await reportsAPI.exportPendingBillsPdf({
+                          fromDate: dateRange.from,
+                          toDate: dateRange.to
+                        })
+                        
+                        const url = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `pending_bills_${dateRange.from}_${dateRange.to}.pdf`
+                        document.body.appendChild(a)
+                        a.click()
+                        a.remove()
+                        window.URL.revokeObjectURL(url)
+                        toast.dismiss()
+                        toast.success('PDF downloaded successfully!')
+                      } catch (error) {
+                        console.error('Failed to export PDF:', error)
+                        toast.dismiss()
+                        toast.error(error.message || 'Failed to export PDF')
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 transition-colors"
+                    disabled={!reportData.outstandingBills || reportData.outstandingBills.length === 0}
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Export PDF</span>
+                  </button>
                 </div>
                 
                 {reportData.outstandingBills && reportData.outstandingBills.length > 0 ? (

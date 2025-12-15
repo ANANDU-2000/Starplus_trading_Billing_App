@@ -336,6 +336,17 @@ export const customersAPI = {
     })
     return response.data
   },
+
+  getCustomerPendingBillsPdf: async (id, fromDate, toDate) => {
+    const params = {}
+    if (fromDate) params.fromDate = fromDate
+    if (toDate) params.toDate = toDate
+    const response = await api.get(`/customers/${id}/pending-bills-pdf`, {
+      params,
+      responseType: 'blob'
+    })
+    return response.data
+  },
 }
 
 export const paymentsAPI = {
@@ -500,6 +511,11 @@ export const reportsAPI = {
 
   getPendingBills: async (params = {}) => {
     const response = await api.get('/reports/pending', { params })
+    return response.data
+  },
+
+  exportPendingBillsPdf: async (params = {}) => {
+    const response = await api.get('/reports/pending-bills/export/pdf', { params, responseType: 'blob' })
     return response.data
   },
 

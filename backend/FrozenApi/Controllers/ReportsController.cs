@@ -627,6 +627,49 @@ namespace FrozenApi.Controllers
             }
         }
 
+        [HttpGet("pending-bills/export/pdf")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> ExportPendingBillsPdf(
+            [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null,
+            [FromQuery] int? customerId = null,
+            [FromQuery] string? status = null)
+        {
+            try
+            {
+                var from = fromDate ?? DateTime.Today.AddDays(-30);
+                var to = toDate ?? DateTime.Today;
+                
+                var pendingBills = await _reportService.GetPendingBillsAsync(from, to, customerId, null, status);
+                
+                if (pendingBills == null || !pendingBills.Any())
+                {
+                    return NotFound(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "No pending bills found for the specified period"
+                    });
+                }
+                
+                var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
+                var pdfBytes = await pdfService.GeneratePendingBillsPdfAsync(pendingBills, from, to);
+                
+                var fileName = $"pending_bills_{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.pdf";
+                
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error exporting pending bills PDF: {ex.Message}");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred while exporting the pending bills report",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpGet("sales/export/html")]
         [Authorize(Roles = "Admin")]
         public async Task<ActionResult> ExportSalesReportHtml(

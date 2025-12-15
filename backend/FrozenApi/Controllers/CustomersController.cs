@@ -401,6 +401,58 @@ namespace FrozenApi.Controllers
                 });
             }
         }
+
+        [HttpGet("{id}/pending-bills-pdf")]
+        public async Task<ActionResult> GetCustomerPendingBillsPdf(int id, [FromQuery] DateTime? fromDate, [FromQuery] DateTime? toDate)
+        {
+            try
+            {
+                var customer = await _customerService.GetCustomerByIdAsync(id);
+                if (customer == null)
+                {
+                    return NotFound(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Customer not found"
+                    });
+                }
+
+                // Get ALL outstanding invoices first
+                var allOutstandingInvoices = await _customerService.GetOutstandingInvoicesAsync(id);
+                
+                // Apply date filter if provided
+                var from = fromDate ?? DateTime.Today.AddMonths(-12); // Default: last 12 months
+                var to = toDate ?? DateTime.Today;
+                
+                var filteredInvoices = allOutstandingInvoices
+                    .Where(inv => inv.InvoiceDate >= from && inv.InvoiceDate <= to.AddDays(1)) // Include end date
+                    .ToList();
+                
+                if (filteredInvoices == null || !filteredInvoices.Any())
+                {
+                    return NotFound(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = $"No pending bills found for this customer in the date range {from:dd-MM-yyyy} to {to:dd-MM-yyyy}"
+                    });
+                }
+                
+                var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
+                var pdfBytes = await pdfService.GenerateCustomerPendingBillsPdfAsync(filteredInvoices, customer, DateTime.UtcNow, from, to);
+                
+                return File(pdfBytes, "application/pdf", $"pending_bills_{customer.Name}_{from:yyyy-MM-dd}_to_{to:yyyy-MM-dd}.pdf");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating customer pending bills PDF: {ex.Message}");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred while generating the pending bills statement",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
     }
 }
 
