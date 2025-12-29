@@ -129,6 +129,27 @@ namespace FrozenApi.Services
                 var trnDisplay = string.IsNullOrWhiteSpace(customerTrn) ? "" : customerTrn;
                 Console.WriteLine($"   Customer TRN: {trnDisplay}");
 
+                // Get customer pending bills count and balance for footer
+                int pendingBillsCount = 0;
+                decimal customerBalance = 0m;
+                if (sale.CustomerId > 0)
+                {
+                    var pendingBills = await _context.Sales
+                        .Where(s => s.CustomerId == sale.CustomerId && s.IsDeleted == false)
+                        .Select(s => new { s.GrandTotal, s.PaidAmount })
+                        .ToListAsync();
+                    
+                    foreach (var bill in pendingBills)
+                    {
+                        var balance = bill.GrandTotal - bill.PaidAmount;
+                        if (balance > 0.01m)
+                        {
+                            pendingBillsCount++;
+                            customerBalance += balance;
+                        }
+                    }
+                }
+
                 var document = Document.Create(container =>
                 {
                     container.Page(page =>
@@ -359,6 +380,14 @@ namespace FrozenApi.Services
                                             rightCol.Item().PaddingTop(1).AlignRight().Text(new string('.', 40)).FontSize(8);
                                         });
                                     });
+
+                                    // Customer Pending Bills and Balance - single line
+                                    if (sale.CustomerId > 0)
+                                    {
+                                        footerCol.Item().PaddingTop(4).BorderTop(0.5f).PaddingTop(2).AlignCenter()
+                                            .Text($"Pending: {pendingBillsCount} | Balance: {settings.Currency} {customerBalance:0.00}")
+                                            .FontSize(9).Bold();
+                                    }
                                 });
                             });
                         });
