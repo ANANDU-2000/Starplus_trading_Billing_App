@@ -34,6 +34,7 @@ const PurchasesPage = () => {
   const [productSearchTerm, setProductSearchTerm] = useState('')
   const [showProductSearch, setShowProductSearch] = useState(false)
   const searchInputRef = useRef(null)
+  const purchaseFormRef = useRef(null)
 
   useEffect(() => {
     loadPurchases()
@@ -363,6 +364,9 @@ const PurchasesPage = () => {
       items: []
     })
     setShowForm(true)
+    setTimeout(() => {
+      purchaseFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 100)
   }
 
   const handleEditPurchase = (purchase) => {
@@ -810,7 +814,7 @@ const PurchasesPage = () => {
 
         {/* Purchase Form - Tally Style */}
         {showForm && (
-          <div className="bg-white rounded-lg border-2 border-lime-300 shadow-lg p-6 mb-6">
+          <div ref={purchaseFormRef} className="bg-white rounded-lg border-2 border-lime-300 shadow-lg p-6 mb-6">
             <div className="flex items-center justify-between mb-3 sm:mb-4 border-b-2 border-lime-400 pb-2">
               <h2 className="text-base sm:text-lg font-bold text-gray-900">
                 {editingPurchase ? 'Edit Purchase Entry' : 'New Purchase Entry'}

@@ -20,6 +20,9 @@ const DashboardTally = () => {
     expensesToday: 0,
     profitToday: 0,
     pendingBills: 0,
+    pendingBillsAmount: 0,
+    purchasesToday: 0,
+    paymentsReceivedToday: 0,
     lowStockCount: 0,
     invoicesToday: 0,
     invoicesWeekly: 0,
@@ -156,6 +159,9 @@ const DashboardTally = () => {
           expensesToday: parseFloat(data.expensesToday || data.ExpensesToday) || 0,
           profitToday: parseFloat(data.profitToday || data.ProfitToday) || 0,
           pendingBills: parseInt(data.pendingBills || data.PendingBills) || 0,
+          pendingBillsAmount: parseFloat(data.pendingBillsAmount || data.PendingBillsAmount) || 0,
+          purchasesToday: parseFloat(data.purchasesToday || data.PurchasesToday) || 0,
+          paymentsReceivedToday: parseFloat(data.paymentsReceivedToday || data.PaymentsReceivedToday) || 0,
           lowStockCount: Array.isArray(data.lowStockProducts || data.LowStockProducts) ? (data.lowStockProducts || data.LowStockProducts || []).length : 0,
           invoicesToday: parseInt(data.invoicesToday || data.InvoicesToday) || 0,
           invoicesWeekly: parseInt(data.invoicesWeekly || data.InvoicesWeekly) || 0,
@@ -353,7 +359,7 @@ const DashboardTally = () => {
           {/* Left: Stats & Quick Actions */}
           <div className="flex-1 p-2 sm:p-3 lg:p-4 space-y-2 sm:space-y-3 lg:space-y-4">
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-1.5 sm:gap-2 lg:gap-3">
               <StatCard
                 title="Sales Today"
                 value={stats.salesToday}
@@ -375,6 +381,27 @@ const DashboardTally = () => {
                 color="blue"
                 loading={loading}
                 adminOnly
+              />
+              <StatCard
+                title="Purchase Today"
+                value={stats.purchasesToday}
+                icon={Truck}
+                color="amber"
+                loading={loading}
+              />
+              <StatCard
+                title="Pending Amount"
+                value={stats.pendingBillsAmount}
+                icon={DollarSign}
+                color="yellow"
+                loading={loading}
+              />
+              <StatCard
+                title="Received Today"
+                value={stats.paymentsReceivedToday}
+                icon={DollarSign}
+                color="green"
+                loading={loading}
               />
             </div>
 
@@ -600,11 +627,20 @@ const StatCard = ({ title, value, icon: Icon, color, loading, adminOnly }) => {
   const colorClasses = {
     green: 'bg-green-50 border-green-200 text-green-800',
     red: 'bg-red-50 border-red-200 text-red-800',
-    blue: 'bg-blue-50 border-blue-200 text-blue-800'
+    blue: 'bg-blue-50 border-blue-200 text-blue-800',
+    amber: 'bg-amber-50 border-amber-200 text-amber-800',
+    yellow: 'bg-yellow-50 border-yellow-200 text-yellow-800'
+  }
+  const iconColorClasses = {
+    green: 'text-green-600',
+    red: 'text-red-600',
+    blue: 'text-blue-600',
+    amber: 'text-amber-600',
+    yellow: 'text-yellow-600'
   }
 
   return (
-    <div className={`rounded-lg shadow-md border-2 p-1.5 sm:p-2 lg:p-3 ${colorClasses[color]}`}>
+    <div className={`rounded-lg shadow-md border-2 p-1.5 sm:p-2 lg:p-3 ${colorClasses[color] || colorClasses.blue}`}>
       <div className="flex items-center justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-[10px] sm:text-xs font-medium mb-0.5 truncate">{title}</p>
@@ -614,7 +650,7 @@ const StatCard = ({ title, value, icon: Icon, color, loading, adminOnly }) => {
             <p className="text-sm sm:text-base lg:text-lg font-bold truncate">{formatCurrency(value)}</p>
           )}
         </div>
-        <div className={`p-1 sm:p-1.5 lg:p-2 bg-white rounded-lg flex-shrink-0 ${color === 'green' ? 'text-green-600' : color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>
+        <div className={`p-1 sm:p-1.5 lg:p-2 bg-white rounded-lg flex-shrink-0 ${iconColorClasses[color] || iconColorClasses.blue}`}>
           <Icon className="h-3 w-3 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
         </div>
       </div>

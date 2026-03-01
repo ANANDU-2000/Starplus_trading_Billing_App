@@ -41,6 +41,7 @@ const Layout = () => {
     { name: 'POS', href: '/pos', icon: ShoppingCart },
     { name: 'Customer Ledger', href: '/ledger', icon: BookOpen },
     { name: 'Expenses', href: '/expenses', icon: Receipt },
+    { name: 'Sales Ledger', href: '/sales-ledger', icon: FileText },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
     { name: 'Worksheet', href: '/worksheet', icon: ClipboardList },
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Users', href: '/users', icon: Shield }] : []),

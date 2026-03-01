@@ -259,6 +259,18 @@ namespace FrozenApi.Services
                     .Where(s => !s.IsDeleted && s.InvoiceDate >= startOfMonth && s.InvoiceDate < today.AddDays(1))
                     .CountAsync();
 
+                decimal paymentsReceivedToday = 0;
+                try
+                {
+                    paymentsReceivedToday = await _context.Payments
+                        .Where(p => p.PaymentDate >= from && p.PaymentDate < to)
+                        .SumAsync(p => (decimal?)p.Amount) ?? 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error calculating payments received: {ex.Message}");
+                }
+
                 var result = new SummaryReportDto
                 {
                     SalesToday = salesToday,
@@ -273,7 +285,8 @@ namespace FrozenApi.Services
                     PaidBillsAmount = paidBillsAmount,
                     InvoicesToday = invoicesToday,
                     InvoicesWeekly = invoicesWeekly,
-                    InvoicesMonthly = invoicesMonthly
+                    InvoicesMonthly = invoicesMonthly,
+                    PaymentsReceivedToday = paymentsReceivedToday
                 };
                 
                 Console.WriteLine($"✅ SummaryReportDto created: Sales={salesToday}, Purchases={purchasesToday}, Expenses={expensesToday}, Profit={profitToday}");
@@ -305,7 +318,8 @@ namespace FrozenApi.Services
                     PaidBillsAmount = 0,
                     InvoicesToday = 0,
                     InvoicesWeekly = 0,
-                    InvoicesMonthly = 0
+                    InvoicesMonthly = 0,
+                    PaymentsReceivedToday = 0
                 };
             }
         }

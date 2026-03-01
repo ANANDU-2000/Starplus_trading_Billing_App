@@ -1438,7 +1438,7 @@ const CustomerLedgerPage = () => {
 
         {/* CUSTOMER SELECTION DROPDOWN (if search active or no customer selected) */}
         {(searchTerm || !selectedCustomer) && (
-          <div className="bg-white border-b border-gray-200 max-h-48 overflow-y-auto">
+          <div className="bg-white border-b border-gray-200 max-h-[50vh] overflow-y-auto">
             <div className="p-2 space-y-1">
               {/* Cash Customer Option */}
               <button
@@ -1482,11 +1482,11 @@ const CustomerLedgerPage = () => {
         {/* MAIN LEDGER VIEW */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {!selectedCustomer ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <Users className="h-16 w-16 mx-auto mb-4 text-gray-400" />
-                <p className="text-xl text-gray-600">Search and select a customer to view ledger</p>
-                <p className="text-sm text-gray-500 mt-2">Use the search bar above (Press F2 to focus)</p>
+            <div className="flex-1 flex items-center justify-center py-8">
+              <div className="text-center max-w-sm">
+                <Users className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                <p className="text-base font-medium text-gray-600">Search and select a customer to view ledger</p>
+                <p className="text-xs text-gray-500 mt-1">Use the search bar above (Press F2 to focus)</p>
               </div>
             </div>
           ) : (

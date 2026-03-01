@@ -372,6 +372,7 @@ namespace FrozenApi.Models
         public int InvoicesToday { get; set; } // Count of invoices today
         public int InvoicesWeekly { get; set; } // Count of invoices this week
         public int InvoicesMonthly { get; set; } // Count of invoices this month
+        public decimal PaymentsReceivedToday { get; set; } // Sum of payments in the report date range
     }
 
     /// <summary>Worksheet report for sharing with partners: period totals only.</summary>
