@@ -21,7 +21,8 @@ import {
   Truck,
   FileText,
   BookOpen,
-  Receipt
+  Receipt,
+  ClipboardList
 } from 'lucide-react'
 import BottomNav from './BottomNav'
 import Logo from './Logo'
@@ -41,6 +42,7 @@ const Layout = () => {
     { name: 'Customer Ledger', href: '/ledger', icon: BookOpen },
     { name: 'Expenses', href: '/expenses', icon: Receipt },
     { name: 'Reports', href: '/reports', icon: BarChart3 },
+    { name: 'Worksheet', href: '/worksheet', icon: ClipboardList },
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Users', href: '/users', icon: Shield }] : []),
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Settings', href: '/settings', icon: Settings }] : []),
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Backup & Restore', href: '/backup', icon: FileText }] : []),

@@ -499,6 +499,16 @@ export const reportsAPI = {
     return response.data
   },
 
+  getWorksheetReport: async (params = {}) => {
+    const response = await api.get('/reports/worksheet', { params })
+    return response.data
+  },
+
+  exportWorksheetPdf: async (params = {}) => {
+    const response = await api.get('/reports/worksheet/export/pdf', { params, responseType: 'blob' })
+    return response.data
+  },
+
   getChequeReport: async () => {
     const response = await api.get('/reports/cheque')
     return response.data

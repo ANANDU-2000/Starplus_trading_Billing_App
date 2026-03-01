@@ -69,6 +69,137 @@ namespace FrozenApi.Controllers
             }
         }
 
+        /// <summary>Get worksheet report for a period (week/month/year/custom). Uses GetSummaryReportAsync only.</summary>
+        [HttpGet("worksheet")]
+        public async Task<ActionResult<ApiResponse<WorksheetReportDto>>> GetWorksheetReport(
+            [FromQuery] string? period = null,
+            [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null)
+        {
+            try
+            {
+                var (from, to, periodLabel) = ResolveWorksheetPeriod(period, fromDate, toDate);
+                if (from > to)
+                    return BadRequest(new ApiResponse<WorksheetReportDto> { Success = false, Message = "Invalid date range: from must be before or equal to to." });
+
+                var summary = await _reportService.GetSummaryReportAsync(from, to);
+                var dto = new WorksheetReportDto
+                {
+                    PeriodLabel = periodLabel,
+                    FromDate = from,
+                    ToDate = to,
+                    TotalSales = summary.SalesToday,
+                    TotalPurchase = summary.PurchasesToday,
+                    TotalExpenses = summary.ExpensesToday,
+                    PendingAmount = summary.PendingBillsAmount,
+                    ReceivedInPeriod = 0,
+                    InvoiceCount = 0
+                };
+                return Ok(new ApiResponse<WorksheetReportDto>
+                {
+                    Success = true,
+                    Message = "Worksheet report retrieved successfully",
+                    Data = dto
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetWorksheetReport: {ex.Message}");
+                return StatusCode(500, new ApiResponse<WorksheetReportDto>
+                {
+                    Success = false,
+                    Message = "An error occurred while generating the worksheet report",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
+        /// <summary>Export worksheet as PDF for sharing with partners.</summary>
+        [HttpGet("worksheet/export/pdf")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> ExportWorksheetPdf(
+            [FromQuery] string? period = null,
+            [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null)
+        {
+            try
+            {
+                var (from, to, periodLabel) = ResolveWorksheetPeriod(period, fromDate, toDate);
+                if (from > to)
+                    return BadRequest(new ApiResponse<object> { Success = false, Message = "Invalid date range." });
+
+                var summary = await _reportService.GetSummaryReportAsync(from, to);
+                var dto = new WorksheetReportDto
+                {
+                    PeriodLabel = periodLabel,
+                    FromDate = from,
+                    ToDate = to,
+                    TotalSales = summary.SalesToday,
+                    TotalPurchase = summary.PurchasesToday,
+                    TotalExpenses = summary.ExpensesToday,
+                    PendingAmount = summary.PendingBillsAmount,
+                    ReceivedInPeriod = 0,
+                    InvoiceCount = 0
+                };
+                var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
+                var pdfBytes = await pdfService.GenerateWorksheetPdfAsync(dto);
+                var fileName = string.Equals(period, "custom", StringComparison.OrdinalIgnoreCase)
+                    ? $"worksheet_{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.pdf"
+                    : $"worksheet_{to:yyyy-MM}.pdf";
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error exporting worksheet PDF: {ex.Message}");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred while exporting the worksheet PDF",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
+        private static (DateTime from, DateTime to, string periodLabel) ResolveWorksheetPeriod(string? period, DateTime? fromDate, DateTime? toDate)
+        {
+            var today = DateTime.Today;
+            var from = today;
+            var to = today.AddDays(1).AddTicks(-1);
+
+            if (string.Equals(period, "custom", StringComparison.OrdinalIgnoreCase) && fromDate.HasValue && toDate.HasValue)
+            {
+                from = fromDate.Value.Date;
+                to = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                var label = $"{from:dd MMM yyyy} – {toDate.Value:dd MMM yyyy}";
+                return (from, to, label);
+            }
+
+            if (string.Equals(period, "week", StringComparison.OrdinalIgnoreCase))
+            {
+                var day = (int)today.DayOfWeek;
+                var diff = day == 0 ? 6 : day - 1;
+                from = today.AddDays(-diff);
+                to = today.AddDays(1).AddTicks(-1);
+                return (from, to, $"Week of {from:dd MMM yyyy}");
+            }
+
+            if (string.Equals(period, "month", StringComparison.OrdinalIgnoreCase))
+            {
+                from = new DateTime(today.Year, today.Month, 1);
+                to = today.AddDays(1).AddTicks(-1);
+                return (from, to, today.ToString("MMMM yyyy"));
+            }
+
+            if (string.Equals(period, "year", StringComparison.OrdinalIgnoreCase))
+            {
+                from = new DateTime(today.Year, 1, 1);
+                to = today.AddDays(1).AddTicks(-1);
+                return (from, to, today.Year.ToString());
+            }
+
+            return (from, to, today.ToString("dd MMM yyyy"));
+        }
+
         [HttpGet("sales")]
         public async Task<ActionResult<ApiResponse<PagedResponse<SaleDto>>>> GetSalesReport(
             [FromQuery] DateTime? fromDate = null,

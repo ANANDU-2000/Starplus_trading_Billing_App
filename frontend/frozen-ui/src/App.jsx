@@ -11,6 +11,7 @@ import CustomerLedgerPage from './pages/CustomerLedgerPage'
 import ExpensesPage from './pages/ExpensesPage'
 import ReportsPage from './pages/ReportsPage'
 import SalesLedgerPage from './pages/SalesLedgerPage'
+import WorksheetPage from './pages/WorksheetPage'
 import SettingsPage from './pages/SettingsPage'
 import UsersPage from './pages/UsersPage'
 import BackupPage from './pages/BackupPage'
@@ -49,6 +50,7 @@ function App() {
           <Route path="/ledger" element={<CustomerLedgerPage />} />
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/sales-ledger" element={<SalesLedgerPage />} />
+          <Route path="/worksheet" element={<WorksheetPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/outstanding" element={<ReportsPage />} />
           <Route path="/users" element={<UsersPage />} />

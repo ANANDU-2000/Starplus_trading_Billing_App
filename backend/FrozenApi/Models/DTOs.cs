@@ -374,6 +374,20 @@ namespace FrozenApi.Models
         public int InvoicesMonthly { get; set; } // Count of invoices this month
     }
 
+    /// <summary>Worksheet report for sharing with partners: period totals only.</summary>
+    public class WorksheetReportDto
+    {
+        public string PeriodLabel { get; set; } = string.Empty;
+        public DateTime FromDate { get; set; }
+        public DateTime ToDate { get; set; }
+        public decimal TotalSales { get; set; }
+        public decimal TotalPurchase { get; set; }
+        public decimal TotalExpenses { get; set; }
+        public decimal PendingAmount { get; set; }
+        public decimal ReceivedInPeriod { get; set; }
+        public int InvoiceCount { get; set; }
+    }
+
     public class AISuggestionsDto
     {
         public List<ProductDto> TopSellers { get; set; } = new();

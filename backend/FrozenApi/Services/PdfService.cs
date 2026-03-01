@@ -1463,6 +1463,72 @@ namespace FrozenApi.Services
             }
         }
 
+        public async Task<byte[]> GenerateWorksheetPdfAsync(WorksheetReportDto worksheet)
+        {
+            try
+            {
+                var settings = await GetCompanySettingsAsync();
+                var document = Document.Create(container =>
+                {
+                    container.Page(page =>
+                    {
+                        page.Size(PageSizes.A4);
+                        page.Margin(15, Unit.Millimetre);
+                        page.PageColor(Colors.White);
+                        page.DefaultTextStyle(x => x.FontSize(10));
+
+                        page.Header().Column(headerCol =>
+                        {
+                            headerCol.Item().Text("WORKSHEET REPORT").FontSize(16).Bold().AlignCenter();
+                            headerCol.Item().Height(3);
+                            headerCol.Item().Row(row =>
+                            {
+                                row.RelativeItem().Text(settings.CompanyNameEn).FontSize(11).Bold();
+                                row.RelativeItem().AlignRight().Text($"Period: {worksheet.PeriodLabel}").FontSize(10);
+                            });
+                            headerCol.Item().Text($"From {worksheet.FromDate:dd-MM-yyyy} to {worksheet.ToDate:dd-MM-yyyy}").FontSize(9).FontColor(Colors.Grey.Medium);
+                            headerCol.Item().Height(8);
+                        });
+
+                        page.Content().PaddingVertical(10).Column(contentCol =>
+                        {
+                            contentCol.Item().Table(t =>
+                            {
+                                t.ColumnsDefinition(c =>
+                                {
+                                    c.RelativeColumn(2f);
+                                    c.RelativeColumn(2f);
+                                });
+                                t.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(6).Text("Item").FontSize(10).Bold();
+                                t.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(6).AlignRight().Text("Amount").FontSize(10).Bold();
+                                t.Cell().Border(1).Padding(6).Text("Total Sales");
+                                t.Cell().Border(1).Padding(6).AlignRight().Text(worksheet.TotalSales.ToString("N2"));
+                                t.Cell().Border(1).Padding(6).Text("Total Purchase");
+                                t.Cell().Border(1).Padding(6).AlignRight().Text(worksheet.TotalPurchase.ToString("N2"));
+                                t.Cell().Border(1).Padding(6).Text("Total Expenses");
+                                t.Cell().Border(1).Padding(6).AlignRight().Text(worksheet.TotalExpenses.ToString("N2"));
+                                t.Cell().Border(1).Padding(6).Text("Pending Amount");
+                                t.Cell().Border(1).Padding(6).AlignRight().Text(worksheet.PendingAmount.ToString("N2")).FontColor(worksheet.PendingAmount > 0 ? Colors.Red.Medium : Colors.Black);
+                                t.Cell().Border(1).Padding(6).Text("Received in Period");
+                                t.Cell().Border(1).Padding(6).AlignRight().Text(worksheet.ReceivedInPeriod.ToString("N2"));
+                            });
+                        });
+
+                        page.Footer().Column(fc =>
+                        {
+                            fc.Item().BorderTop(1).PaddingTop(3).Text($"Generated on {DateTime.Now:dd-MM-yyyy HH:mm}").FontSize(8);
+                        });
+                    });
+                });
+                return document.GeneratePdf();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Worksheet PDF error: {ex.Message}");
+                throw;
+            }
+        }
+
     }
 }
 
