@@ -83,6 +83,9 @@ namespace FrozenApi.Controllers
                     return BadRequest(new ApiResponse<WorksheetReportDto> { Success = false, Message = "Invalid date range: from must be before or equal to to." });
 
                 var summary = await _reportService.GetSummaryReportAsync(from, to);
+                var receivedInPeriod = await _context.Payments
+                    .Where(p => p.PaymentDate >= from && p.PaymentDate <= to)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0;
                 var dto = new WorksheetReportDto
                 {
                     PeriodLabel = periodLabel,
@@ -92,7 +95,7 @@ namespace FrozenApi.Controllers
                     TotalPurchase = summary.PurchasesToday,
                     TotalExpenses = summary.ExpensesToday,
                     PendingAmount = summary.PendingBillsAmount,
-                    ReceivedInPeriod = 0,
+                    ReceivedInPeriod = receivedInPeriod,
                     InvoiceCount = 0
                 };
                 return Ok(new ApiResponse<WorksheetReportDto>
@@ -129,6 +132,9 @@ namespace FrozenApi.Controllers
                     return BadRequest(new ApiResponse<object> { Success = false, Message = "Invalid date range." });
 
                 var summary = await _reportService.GetSummaryReportAsync(from, to);
+                var receivedInPeriod = await _context.Payments
+                    .Where(p => p.PaymentDate >= from && p.PaymentDate <= to)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0;
                 var dto = new WorksheetReportDto
                 {
                     PeriodLabel = periodLabel,
@@ -138,7 +144,7 @@ namespace FrozenApi.Controllers
                     TotalPurchase = summary.PurchasesToday,
                     TotalExpenses = summary.ExpensesToday,
                     PendingAmount = summary.PendingBillsAmount,
-                    ReceivedInPeriod = 0,
+                    ReceivedInPeriod = receivedInPeriod,
                     InvoiceCount = 0
                 };
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
