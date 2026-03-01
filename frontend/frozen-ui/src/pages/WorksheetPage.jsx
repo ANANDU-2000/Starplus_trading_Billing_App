@@ -131,7 +131,7 @@ const WorksheetPage = () => {
   const periodLabel = d.periodLabel ?? d.PeriodLabel ?? ''
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto">
+    <div className="flex flex-col h-full w-full">
       <div className="flex-shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-200">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">

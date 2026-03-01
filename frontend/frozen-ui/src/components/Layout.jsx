@@ -219,7 +219,7 @@ const Layout = () => {
         {/* Page content */}
         <main className="flex-1 pb-20 lg:pb-6 pt-14 lg:pt-20">
           <div className="py-1 sm:py-2 lg:py-6">
-            <div className="mx-auto max-w-7xl px-1.5 sm:px-2 lg:px-4 xl:px-8">
+            <div className="w-full px-2 sm:px-3 lg:px-4">
               <Outlet />
             </div>
           </div>
