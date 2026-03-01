@@ -950,26 +950,30 @@ namespace FrozenApi.Services
                         // Content
                         page.Content().PaddingVertical(5).Column(contentCol =>
                         {
-                            // Summary Section
+                            // Summary Section (real period-based: Sales, Payments, Purchase, Expenses — no profit)
                             contentCol.Item().Table(summaryTable =>
                             {
                                 summaryTable.ColumnsDefinition(columns =>
                                 {
-                                    columns.RelativeColumn(2.5f);
-                                    columns.RelativeColumn(2.5f);
-                                    columns.RelativeColumn(2.5f);
-                                    columns.RelativeColumn(2.5f);
+                                    columns.RelativeColumn(2f);
+                                    columns.RelativeColumn(2f);
+                                    columns.RelativeColumn(2f);
+                                    columns.RelativeColumn(2f);
+                                    columns.RelativeColumn(2f);
+                                    columns.RelativeColumn(2f);
                                 });
-
                                 summaryTable.Cell().Border(1).Padding(4).Text("Total Sales").FontSize(9).Bold();
                                 summaryTable.Cell().Border(1).Padding(4).Text("Total Payments").FontSize(9).Bold();
-                            summaryTable.Cell().Border(1).Padding(4).Text("Total Real Pending").FontSize(9).Bold();
-                            summaryTable.Cell().Border(1).Padding(4).Text("Total Real Got Payment").FontSize(9).Bold();
-
+                                summaryTable.Cell().Border(1).Padding(4).Text("Total Purchase").FontSize(9).Bold();
+                                summaryTable.Cell().Border(1).Padding(4).Text("Total Expenses").FontSize(9).Bold();
+                                summaryTable.Cell().Border(1).Padding(4).Text("Total Pending").FontSize(9).Bold();
+                                summaryTable.Cell().Border(1).Padding(4).Text("Balance").FontSize(9).Bold();
                                 summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.TotalSales.ToString("N2")).FontSize(9);
                                 summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.TotalPayments.ToString("N2")).FontSize(9);
+                                summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.TotalPurchase.ToString("N2")).FontSize(9);
+                                summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.TotalExpenses.ToString("N2")).FontSize(9);
                                 summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.TotalDebit.ToString("N2")).FontSize(9);
-                                summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.TotalCredit.ToString("N2")).FontSize(9);
+                                summaryTable.Cell().Border(1).Padding(4).AlignRight().Text(ledgerReport.Summary.OutstandingBalance.ToString("N2")).FontSize(9);
                             });
 
                             contentCol.Item().Height(5);

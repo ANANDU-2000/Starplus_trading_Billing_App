@@ -585,12 +585,11 @@ namespace FrozenApi.Controllers
                     var filteredEntries = ledgerReport.Entries
                         .Where(e => e.Type.Equals(type, StringComparison.OrdinalIgnoreCase))
                         .ToList();
-                    
-                    // Recalculate summary for filtered entries
+                    var origSummary = ledgerReport.Summary;
                     var totalRealPending = filteredEntries.Sum(e => e.RealPending);
                     var totalRealGotPayment = filteredEntries.Sum(e => e.RealGotPayment);
-                    var totalSales = filteredEntries.Where(e => e.Type == "Sale").Sum(e => e.RealPending);
-                    var totalPayments = filteredEntries.Where(e => e.Type == "Payment").Sum(e => e.RealGotPayment);
+                    var totalSalesFiltered = filteredEntries.Where(e => e.Type == "Sale").Sum(e => e.GrandTotal);
+                    var totalPaymentsFiltered = filteredEntries.Where(e => e.Type == "Payment").Sum(e => e.RealGotPayment);
                     
                     ledgerReport = new SalesLedgerReportDto
                     {
@@ -599,9 +598,11 @@ namespace FrozenApi.Controllers
                         {
                             TotalDebit = totalRealPending,
                             TotalCredit = totalRealGotPayment,
-                            OutstandingBalance = 0, // Not used anymore
-                            TotalSales = totalSales,
-                            TotalPayments = totalPayments
+                            OutstandingBalance = totalSalesFiltered - totalPaymentsFiltered,
+                            TotalSales = totalSalesFiltered,
+                            TotalPayments = totalPaymentsFiltered,
+                            TotalPurchase = origSummary.TotalPurchase,
+                            TotalExpenses = origSummary.TotalExpenses
                         }
                     };
                 }

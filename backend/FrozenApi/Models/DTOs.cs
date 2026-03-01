@@ -817,6 +817,10 @@ namespace FrozenApi.Models
         public decimal OutstandingBalance { get; set; }
         public decimal TotalSales { get; set; }
         public decimal TotalPayments { get; set; }
+        /// <summary>Cost of goods sold (real purchase/cost for sales in period).</summary>
+        public decimal TotalPurchase { get; set; }
+        /// <summary>Total expenses in the period.</summary>
+        public decimal TotalExpenses { get; set; }
     }
 }
 

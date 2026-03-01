@@ -11,11 +11,35 @@ import { LoadingCard } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import { reportsAPI } from '../services'
 
+// Period presets: Today, This Week, This Month, Custom
+const getPeriodDates = (preset) => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const to = new Date(today)
+  to.setHours(23, 59, 59, 999)
+  let from = new Date(today)
+  if (preset === 'today') {
+    from = new Date(today)
+  } else if (preset === 'thisWeek') {
+    const day = today.getDay()
+    const diff = day === 0 ? 6 : day - 1 // Monday = 0
+    from.setDate(today.getDate() - diff)
+  } else if (preset === 'thisMonth') {
+    from.setDate(1)
+  }
+  from.setHours(0, 0, 0, 0)
+  return {
+    from: from.toISOString().split('T')[0],
+    to: to.toISOString().split('T')[0]
+  }
+}
+
 const SalesLedgerPage = () => {
   const [loading, setLoading] = useState(true)
-  const [dateRange, setDateRange] = useState({
-    from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    to: new Date().toISOString().split('T')[0]
+  const [periodPreset, setPeriodPreset] = useState('thisMonth') // today | thisWeek | thisMonth | custom
+  const [dateRange, setDateRange] = useState(() => {
+    const { from, to } = getPeriodDates('thisMonth')
+    return { from, to }
   })
   const [filters, setFilters] = useState({
     date: '',
@@ -37,6 +61,19 @@ const SalesLedgerPage = () => {
   useEffect(() => {
     fetchSalesLedger()
   }, [dateRange])
+
+  const handlePeriodPreset = (preset) => {
+    setPeriodPreset(preset)
+    if (preset !== 'custom') {
+      const { from, to } = getPeriodDates(preset)
+      setDateRange({ from, to })
+    }
+  }
+
+  const handleDateRangeChange = (field, value) => {
+    setPeriodPreset('custom')
+    setDateRange(prev => ({ ...prev, [field]: value }))
+  }
 
   const fetchSalesLedger = async () => {
     setLoading(true)
@@ -211,13 +248,20 @@ const SalesLedgerPage = () => {
   // Total Invoices = Count of sales entries (not transactions)
   const totalInvoices = salesEntries.length
   
+  // Period-based totals from API (real purchase/cost of sales and expenses for the selected date range)
+  const summary = reportData.salesLedgerSummary || {}
+  const periodPurchase = summary.totalPurchase ?? summary.TotalPurchase ?? 0
+  const periodExpenses = summary.totalExpenses ?? summary.TotalExpenses ?? 0
+
   const filteredSummary = {
-    totalSales,           // Total bill amounts (invoices)
-    totalPayments,        // Total paid (from sales + payments)
-    totalRealPending,     // Total pending (unpaid amounts)
-    totalRealGotPayment: totalPayments, // Alias for compatibility
-    pendingBalance,       // Net balance (Sales - Payments)
-    totalInvoices         // Count of invoices
+    totalSales,
+    totalPayments,
+    totalRealPending,
+    totalRealGotPayment: totalPayments,
+    pendingBalance,
+    totalInvoices,
+    totalPurchase: periodPurchase,
+    totalExpenses: periodExpenses
   }
 
   const handleExport = async () => {
@@ -281,20 +325,47 @@ const SalesLedgerPage = () => {
             <p className="text-xs text-gray-600 hidden md:block">Comprehensive sales and payment tracking</p>
           </div>
           <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
-            <div className="flex gap-1.5 flex-1 md:flex-initial">
-              <input
-                type="date"
-                value={dateRange.from}
-                onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-                className="flex-1 md:flex-initial px-2 py-1.5 border border-gray-300 rounded text-xs"
-              />
-              <input
-                type="date"
-                value={dateRange.to}
-                onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-                className="flex-1 md:flex-initial px-2 py-1.5 border border-gray-300 rounded text-xs"
-              />
+            <div className="flex flex-wrap gap-1">
+              {[
+                { value: 'today', label: 'Today' },
+                { value: 'thisWeek', label: 'This Week' },
+                { value: 'thisMonth', label: 'This Month' },
+                { value: 'custom', label: 'Custom' }
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => handlePeriodPreset(value)}
+                  className={`px-2 py-1 rounded text-xs font-medium ${
+                    periodPreset === value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            {(periodPreset === 'custom' || periodPreset === '') && (
+              <div className="flex gap-1.5 flex-1 md:flex-initial">
+                <input
+                  type="date"
+                  value={dateRange.from}
+                  onChange={(e) => handleDateRangeChange('from', e.target.value)}
+                  className="flex-1 md:flex-initial px-2 py-1.5 border border-gray-300 rounded text-xs"
+                />
+                <input
+                  type="date"
+                  value={dateRange.to}
+                  onChange={(e) => handleDateRangeChange('to', e.target.value)}
+                  className="flex-1 md:flex-initial px-2 py-1.5 border border-gray-300 rounded text-xs"
+                />
+              </div>
+            )}
+            {periodPreset !== 'custom' && periodPreset !== '' && (
+              <span className="text-xs text-gray-600">
+                {dateRange.from} → {dateRange.to}
+              </span>
+            )}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className="px-2 md:px-3 py-1.5 border border-gray-300 rounded text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 flex items-center gap-1"
@@ -425,8 +496,8 @@ const SalesLedgerPage = () => {
         </div>
       )}
 
-      {/* Summary Cards - Fixed */}
-      <div className="flex-shrink-0 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1.5 md:gap-2 lg:gap-3 px-2 md:px-4 py-2 md:py-3 bg-white border-b border-gray-200">
+      {/* Summary Cards - Period-based real totals (no profit shown per client) */}
+      <div className="flex-shrink-0 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-1.5 md:gap-2 lg:gap-3 px-2 md:px-4 py-2 md:py-3 bg-white border-b border-gray-200">
         <div className="bg-blue-50 rounded p-1.5 md:p-2 lg:p-3 border-l-2 md:border-l-4 border-blue-500">
           <div className="text-[9px] md:text-[10px] lg:text-xs text-gray-600 uppercase mb-0.5">Sales</div>
           <div className="text-sm md:text-base lg:text-lg font-bold text-gray-900 truncate">
@@ -437,6 +508,18 @@ const SalesLedgerPage = () => {
           <div className="text-[9px] md:text-[10px] lg:text-xs text-gray-600 uppercase mb-0.5">Received</div>
           <div className="text-sm md:text-base lg:text-lg font-bold text-green-600 truncate">
             {formatCurrency(filteredSummary.totalPayments)}
+          </div>
+        </div>
+        <div className="bg-amber-50 rounded p-1.5 md:p-2 lg:p-3 border-l-2 md:border-l-4 border-amber-600">
+          <div className="text-[9px] md:text-[10px] lg:text-xs text-gray-600 uppercase mb-0.5">Purchase</div>
+          <div className="text-sm md:text-base lg:text-lg font-bold text-amber-700 truncate" title="Cost of sales for this period">
+            {formatCurrency(filteredSummary.totalPurchase)}
+          </div>
+        </div>
+        <div className="bg-rose-50 rounded p-1.5 md:p-2 lg:p-3 border-l-2 md:border-l-4 border-rose-500">
+          <div className="text-[9px] md:text-[10px] lg:text-xs text-gray-600 uppercase mb-0.5">Expenses</div>
+          <div className="text-sm md:text-base lg:text-lg font-bold text-rose-700 truncate" title="Expenses in this period">
+            {formatCurrency(filteredSummary.totalExpenses)}
           </div>
         </div>
         <div className="bg-yellow-50 rounded p-1.5 md:p-2 lg:p-3 border-l-2 md:border-l-4 border-yellow-500">
@@ -462,7 +545,7 @@ const SalesLedgerPage = () => {
           </div>
         </div>
         <div className="bg-indigo-50 rounded p-1.5 md:p-2 lg:p-3 border-l-2 md:border-l-4 border-indigo-500">
-          <div className="text-[9px] md:text-[10px] lg:text-xs text-gray-600 uppercase mb-0.5">Total</div>
+          <div className="text-[9px] md:text-[10px] lg:text-xs text-gray-600 uppercase mb-0.5">Rows</div>
           <div className="text-sm md:text-base lg:text-lg font-bold text-indigo-600">
             {filteredLedger.length}
           </div>

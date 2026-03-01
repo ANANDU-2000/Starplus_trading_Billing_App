@@ -1599,19 +1599,39 @@ namespace FrozenApi.Services
             var totalRealGotPayment = totalPayments;
             
             // 5. Pending Balance = Total Sales - Total Payments (net outstanding)
-            // This is the actual amount still owed after all payments
             var pendingBalance = totalSales - totalPayments;
+
+            // 6. Total Purchase (Cost of Goods Sold) - real cost of sales in this period
+            var saleIdsSet = sales.Select(s => s.Id).ToHashSet();
+            var saleItemsForCogs = await _context.SaleItems
+                .Include(si => si.Product)
+                .Where(si => saleIdsSet.Contains(si.SaleId))
+                .ToListAsync();
+            var totalPurchase = saleItemsForCogs.Sum(si =>
+            {
+                var conversionFactor = si.Product.ConversionToBase > 0 ? si.Product.ConversionToBase : 1;
+                var baseQty = si.Qty * conversionFactor;
+                var costExclVat = baseQty * si.Product.CostPrice;
+                return costExclVat * 1.05m; // Include 5% VAT for cash cost
+            });
+
+            // 7. Total Expenses in period
+            var totalExpenses = await _context.Expenses
+                .Where(e => e.Date >= from && e.Date <= to)
+                .SumAsync(e => (decimal?)e.Amount) ?? 0;
 
             return new SalesLedgerReportDto
             {
                 Entries = ledgerEntries,
                 Summary = new SalesLedgerSummary
                 {
-                    TotalDebit = totalRealPending, // Keep for backward compatibility
-                    TotalCredit = totalRealGotPayment, // Keep for backward compatibility
-                    OutstandingBalance = pendingBalance, // CORRECTED: Use calculated pending balance
-                    TotalSales = totalSales, // CORRECTED: Sum of all invoice amounts
-                    TotalPayments = totalPayments // CORRECTED: Sum of all payments
+                    TotalDebit = totalRealPending,
+                    TotalCredit = totalRealGotPayment,
+                    OutstandingBalance = pendingBalance,
+                    TotalSales = totalSales,
+                    TotalPayments = totalPayments,
+                    TotalPurchase = totalPurchase,
+                    TotalExpenses = totalExpenses
                 }
             };
         }
