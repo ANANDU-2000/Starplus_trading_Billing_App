@@ -466,12 +466,12 @@ namespace FrozenApi.Controllers
             {
                 var bytes = await _receiptService.GetReceiptPdfAsync(receiptId);
                 if (bytes == null || bytes.Length == 0)
-                    return NotFound();
+                    return StatusCode(500, new ApiResponse<object> { Success = false, Message = "Receipt not found or could not be generated." });
                 return File(bytes, "text/html", $"Receipt-{receiptId}.html");
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return StatusCode(500);
+                return StatusCode(500, new ApiResponse<object> { Success = false, Message = ex.Message });
             }
         }
     }

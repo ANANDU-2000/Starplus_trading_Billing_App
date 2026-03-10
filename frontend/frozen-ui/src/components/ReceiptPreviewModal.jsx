@@ -25,20 +25,27 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
           ? await paymentsAPI.generateReceipt(paymentIds[0])
           : await paymentsAPI.generateReceiptBatch(paymentIds)
         if (cancelled) return
+        // API returns { success, data: PaymentReceiptDto, message }; receipt id is on the DTO
         const data = res?.data ?? res
-        if (!data?.id) throw new Error('Invalid receipt response')
+        const receiptId = data?.id ?? data?.Id
+        if (receiptId == null) throw new Error('Invalid receipt response')
         setReceipt(data)
-        const pdfRes = await paymentsAPI.getReceiptPdf(data.id)
+        const pdfRes = await paymentsAPI.getReceiptPdf(receiptId)
         if (cancelled) return
         const blob = pdfRes instanceof Blob ? pdfRes : new Blob([pdfRes])
         const html = await blob.text()
         setReceiptHtml(html)
-        toast.success(`Receipt ${data.receiptNumber || data.id} generated`)
+        toast.success(`Receipt ${data.receiptNumber || receiptId} generated`)
       } catch (err) {
         if (!cancelled) {
-          const msg = err?.response?.data?.message || err?.message || 'Failed to generate receipt'
-          setError(msg)
-          toast.error(msg)
+          const status = err?.response?.status
+          const serverMsg = typeof err?.response?.data?.message === 'string' ? err.response.data.message : null
+          const userMessage =
+            status === 404 || status === 500
+              ? 'Receipt could not be loaded. Please try again or contact support.'
+              : serverMsg || err?.message || 'Failed to generate receipt'
+          setError(userMessage)
+          toast.error(userMessage)
         }
       } finally {
         if (!cancelled) setLoading(false)

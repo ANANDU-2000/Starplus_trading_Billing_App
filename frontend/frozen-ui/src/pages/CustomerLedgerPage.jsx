@@ -48,6 +48,10 @@ const CustomerLedgerPage = () => {
   const paymentLoadingRef = useRef(false)
   const customerLoadingRef = useRef(false)
   const recalculateInProgress = useRef(new Set()) // Track recalculate calls to prevent flooding
+  const validationToastShownRef = useRef({ balance: null, paymentIntegrity: null }) // { balance: { customerId, at }, paymentIntegrity: { customerId, at } }
+  const recalcJustRanRef = useRef(null) // { customerId, at } - skip balance block if same customer ran recalc recently
+  const VALIDATION_TOAST_THROTTLE_MS = 15000
+  const RECALC_COOLDOWN_MS = 8000
   const [customers, setCustomers] = useState([])
   const [filteredCustomers, setFilteredCustomers] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
@@ -198,7 +202,8 @@ const CustomerLedgerPage = () => {
     }
   }, [searchParams, customers])
 
-  // Load customer data when selected (debounced to prevent excessive calls)
+  // Load customer data when selected (debounced to prevent excessive calls).
+  // Intentionally does NOT depend on showReceiptModal/selectedPaymentIds so opening/closing receipt modal does not trigger reload.
   useEffect(() => {
     if (selectedCustomer) {
       const timeoutId = setTimeout(() => {
@@ -206,7 +211,7 @@ const CustomerLedgerPage = () => {
       }, 300) // 300ms debounce
       return () => clearTimeout(timeoutId)
     }
-  }, [selectedCustomer?.id, dateRange.from, dateRange.to]) // Only depend on IDs, not full objects
+  }, [selectedCustomer?.id, dateRange.from, dateRange.to])
 
   // Refresh data when window regains focus (e.g., returning from POS edit)
   useEffect(() => {
@@ -717,23 +722,36 @@ const CustomerLedgerPage = () => {
           }
         } else if (validationReport.warnings.length > 0) {
           console.warn('⚠️ Data validation warnings:', validationReport.warnings)
-          // Show warning but don't block - data is usable but has minor discrepancies
-          if (validationReport.discrepancies.some(d => d.type === 'BALANCE_MISMATCH')) {
-            toast('Balance discrepancy detected. Recalculating...', { icon: '⚠️' })
+          const balanceMismatch = validationReport.discrepancies.some(d => d.type === 'BALANCE_MISMATCH')
+          const recalcRecent = recalcJustRanRef.current?.customerId === customerId &&
+            (Date.now() - (recalcJustRanRef.current?.at ?? 0)) < RECALC_COOLDOWN_MS
+          if (balanceMismatch && !recalcRecent) {
+            const balanceToastShown = validationToastShownRef.current.balance?.customerId === customerId &&
+              (Date.now() - (validationToastShownRef.current.balance?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
+            if (!balanceToastShown) {
+              toast('Balance discrepancy detected. Recalculating...', { icon: '⚠️' })
+              validationToastShownRef.current = { ...validationToastShownRef.current, balance: { customerId, at: Date.now() } }
+            }
             const recalcResult = await recalculateCustomerBalance(customerId)
+            recalcJustRanRef.current = { customerId, at: Date.now() }
             if (recalcResult.success) {
               setTimeout(() => loadCustomerData(customerId), 1000)
             }
           }
         }
         
-        // Verify payment integrity
+        // Verify payment integrity - show toast at most once per customer per throttle window
         const paymentIntegrity = verifyPaymentIntegrity(customerPayments, invoicesData)
         if (!paymentIntegrity.isValid) {
           console.error('❌ Payment integrity issues:', paymentIntegrity.issues)
-          toast.error(`${paymentIntegrity.issues.length} payment integrity issue(s) detected`, {
-            duration: 5000
-          })
+          const piToastShown = validationToastShownRef.current.paymentIntegrity?.customerId === customerId &&
+            (Date.now() - (validationToastShownRef.current.paymentIntegrity?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
+          if (!piToastShown) {
+            toast.error(`${paymentIntegrity.issues.length} payment integrity issue(s) detected`, {
+              duration: 5000
+            })
+            validationToastShownRef.current = { ...validationToastShownRef.current, paymentIntegrity: { customerId, at: Date.now() } }
+          }
         }
       }
     } catch (error) {
@@ -789,6 +807,8 @@ const CustomerLedgerPage = () => {
     setCustomerSummary(null)
     setSelectedCustomer(customer)
     setSearchTerm('')
+    validationToastShownRef.current = { balance: null, paymentIntegrity: null }
+    recalcJustRanRef.current = null
   }
 
   const handleAddCustomer = async (data) => {
