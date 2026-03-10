@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using FrozenApi.Services;
 using FrozenApi.Models;
+using FrozenApi.Helpers;
 
 namespace FrozenApi.Controllers
 {
@@ -42,6 +43,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<PagedResponse<CustomerDto>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<PagedResponse<CustomerDto>>
                 {
                     Success = false,
@@ -77,6 +80,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<List<CustomerDto>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<List<CustomerDto>>
                 {
                     Success = false,
@@ -110,6 +115,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<CustomerDto> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<CustomerDto>
                 {
                     Success = false,
@@ -293,6 +300,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<List<CustomerLedgerEntry>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<List<CustomerLedgerEntry>>
                 {
                     Success = false,
@@ -318,6 +327,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<List<CustomerLedgerEntry>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<List<CustomerLedgerEntry>>
                 {
                     Success = false,

@@ -5,6 +5,17 @@
 > **Production Stack**: React + .NET 9 + PostgreSQL on Render  
 > **Cost**: Free tier available (Backend + Database upgradeable to $5/month for production)
 
+### ⚠️ If you see "Failed to load customer data" / "column s.RoundOff does not exist" / "Failed to load expense categories"
+
+Your **production database is missing schema**. Run this **once**:
+
+1. Open **[Render Dashboard](https://dashboard.render.com/)** → select your **PostgreSQL** service.
+2. Click **Connect** (or use the **PSQL Command** / **External Database URL**).
+3. Copy the **entire contents** of `backend/FrozenApi/Scripts/ApplyMissingSchema.sql` from this repo and paste into the PSQL session, then run it.
+4. Reload your app. Customer data, sales report, and expense categories should load.
+
+(See [Issue 6: Schema outdated](#issue-6-schema-outdated-roundoff--missing-column) in Troubleshooting for details.)
+
 ---
 
 ## 📋 Table of Contents

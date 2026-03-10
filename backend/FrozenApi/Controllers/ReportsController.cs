@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using FrozenApi.Services;
 using FrozenApi.Models;
 using FrozenApi.Data;
+using FrozenApi.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace FrozenApi.Controllers
@@ -232,14 +233,9 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
-                // Log the full exception details for debugging
                 Console.WriteLine($"Error in GetSalesReport: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
-                }
-                
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<PagedResponse<SaleDto>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<PagedResponse<SaleDto>>
                 {
                     Success = false,

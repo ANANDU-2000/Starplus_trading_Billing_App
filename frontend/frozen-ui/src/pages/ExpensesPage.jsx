@@ -81,7 +81,7 @@ const ExpensesPage = () => {
       }
     } catch (error) {
       console.error('Failed to load categories:', error)
-      toast.error('Failed to load expense categories')
+      toast.error(error?.response?.data?.message || 'Failed to load expense categories')
       setCategories([])
     }
   }, [])

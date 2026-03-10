@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using FrozenApi.Services;
 using FrozenApi.Models;
 using FrozenApi.Data;
+using FrozenApi.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace FrozenApi.Controllers
@@ -48,6 +49,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<PagedResponse<ExpenseDto>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<PagedResponse<ExpenseDto>>
                 {
                     Success = false,
@@ -302,6 +305,8 @@ namespace FrozenApi.Controllers
             }
             catch (Exception ex)
             {
+                if (SchemaOutdatedHelper.IsSchemaOutdated(ex))
+                    return StatusCode(503, new ApiResponse<List<ExpenseCategoryDto>> { Success = false, Message = SchemaOutdatedHelper.SchemaOutdatedMessage });
                 return StatusCode(500, new ApiResponse<List<ExpenseCategoryDto>>
                 {
                     Success = false,

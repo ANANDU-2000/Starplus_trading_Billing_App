@@ -762,7 +762,7 @@ const CustomerLedgerPage = () => {
         
         // Only show error if it's not a 429 (rate limit) or throttled request
         if (error?.response?.status !== 429 && !error?.isThrottled && !error?.isRateLimited) {
-          toast.error('Failed to load customer data')
+          toast.error(error?.response?.data?.message || 'Failed to load customer data')
         }
       }
       
