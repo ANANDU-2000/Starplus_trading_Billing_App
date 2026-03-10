@@ -31,6 +31,10 @@ namespace FrozenApi.Services
             if (paymentIds == null || paymentIds.Length == 0)
                 throw new InvalidOperationException("At least one payment is required.");
 
+            var distinctIds = paymentIds.Distinct().ToArray();
+            if (distinctIds.Length != paymentIds.Length)
+                throw new InvalidOperationException("Duplicate payment IDs are not allowed.");
+
             var payments = await _context.Payments
                 .Include(p => p.Sale)
                 .Include(p => p.Customer)
@@ -41,7 +45,15 @@ namespace FrozenApi.Services
             if (payments.Count != paymentIds.Length)
                 throw new InvalidOperationException("One or more payment IDs were not found.");
 
+            var now = DateTime.UtcNow.Date;
+            var futurePayments = payments.Where(p => p.PaymentDate.Date > now).ToList();
+            if (futurePayments.Any())
+                throw new InvalidOperationException("Cannot generate receipt: one or more payments have a future payment date. Please correct the payment dates first.");
+
             var totalAmount = payments.Sum(p => p.Amount);
+            if (totalAmount <= 0)
+                throw new InvalidOperationException("Cannot generate receipt: total payment amount must be greater than zero.");
+
             var customerId = payments.First().CustomerId;
             if (payments.Any(p => p.CustomerId != customerId))
                 throw new InvalidOperationException("All payments must belong to the same customer.");
@@ -129,6 +141,8 @@ namespace FrozenApi.Services
             if (receipt == null) return null;
 
             var payments = receipt.PaymentLinks.Select(l => l.Payment).Where(p => p != null).Cast<Payment>().ToList();
+            if (payments.Count == 0)
+                return null;
             var totalAmount = payments.Sum(p => p.Amount);
             var customerId = payments.First().CustomerId;
             var customer = payments.First().Customer;
@@ -313,8 +327,9 @@ th{{background:#f0f0f0;}}
 <div style=""margin-top:8px;"">{dto.CompanyNameEn}<br/>{dto.CompanyAddress} | TRN: {dto.CompanyTrn} | {dto.CompanyPhone}</div>
 <div style=""margin-top:12px;""><strong>Received From:</strong> {dto.CustomerName}<br/>TRN: {dto.CustomerTrn ?? "-"}<br/>{dto.CustomerAddress ?? ""}</div>
 <div style=""margin-top:8px;""><strong>Payment Method:</strong> {string.Join(", ", dto.Payments.Select(p => p.Method + (p.Reference != null ? " - " + p.Reference : "")))}</div>
+<div style=""margin-top:6px;font-size:13px;""><strong>Payment date(s):</strong> {string.Join(", ", dto.Payments.Select(p => p.PaymentDate.ToString("dd-MM-yyyy")).Distinct())}</div>
 <table style=""margin-top:12px;"">
-<thead><tr><th>Invoice No</th><th>Date</th><th>Invoice Total</th><th>Paid Amount</th></tr></thead>
+<thead><tr><th>Invoice No</th><th>Invoice Date</th><th>Invoice Total</th><th>Paid Amount</th></tr></thead>
 <tbody>{invoicesRows}</tbody>
 </table>
 <div style=""margin-top:12px;font-weight:bold;"">Total Paid: {dto.TotalAmount:N2} AED</div>
