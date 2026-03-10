@@ -46,17 +46,28 @@ namespace FrozenApi.Services
             if (payments.Any(p => p.CustomerId != customerId))
                 throw new InvalidOperationException("All payments must belong to the same customer.");
 
+            // Only reuse an existing receipt when it contains exactly the same set of payments (no more, no less).
             var existingLink = await _context.PaymentReceiptPayments
                 .Where(pr => paymentIds.Contains(pr.PaymentId))
-                .Select(pr => pr.PaymentReceiptId)
+                .Select(pr => new { pr.PaymentReceiptId, pr.PaymentId })
                 .ToListAsync();
             if (existingLink.Count == paymentIds.Length)
             {
-                var sameReceiptId = existingLink.Distinct().Count() == 1 ? existingLink.First() : (int?)null;
-                if (sameReceiptId.HasValue)
+                var receiptIds = existingLink.Select(x => x.PaymentReceiptId).Distinct().ToList();
+                if (receiptIds.Count == 1)
                 {
-                    var existing = await BuildReceiptDtoAsync(sameReceiptId.Value, true);
-                    if (existing != null) return existing;
+                    var receiptId = receiptIds[0];
+                    var paymentIdsInReceipt = await _context.PaymentReceiptPayments
+                        .Where(pr => pr.PaymentReceiptId == receiptId)
+                        .Select(pr => pr.PaymentId)
+                        .ToListAsync();
+                    var requestedSet = paymentIds.OrderBy(x => x).ToList();
+                    var existingSet = paymentIdsInReceipt.OrderBy(x => x).ToList();
+                    if (requestedSet.SequenceEqual(existingSet))
+                    {
+                        var existing = await BuildReceiptDtoAsync(receiptId, true);
+                        if (existing != null) return existing;
+                    }
                 }
             }
 
@@ -129,6 +140,7 @@ namespace FrozenApi.Services
             var companyTrn = settings.GetValueOrDefault("COMPANY_TRN") ?? "";
             var companyPhone = settings.GetValueOrDefault("COMPANY_PHONE") ?? "";
 
+            // Previous/remaining balance: use CLEARED payments only (matches BalanceService and customer ledger logic)
             decimal previousBalance = 0;
             if (customerId.HasValue)
             {
@@ -137,7 +149,7 @@ namespace FrozenApi.Services
                     .Where(s => s.CustomerId == customerId && !s.IsDeleted && s.InvoiceDate <= asOfDate)
                     .SumAsync(s => s.GrandTotal);
                 var paymentsBefore = await _context.Payments
-                    .Where(p => p.CustomerId == customerId && p.PaymentDate < asOfDate)
+                    .Where(p => p.CustomerId == customerId && p.PaymentDate < asOfDate && p.Status == PaymentStatus.CLEARED)
                     .SumAsync(p => p.Amount);
                 previousBalance = salesBefore - paymentsBefore;
             }
@@ -263,7 +275,7 @@ th{{background:#f0f0f0;}}
 <thead><tr><th>Invoice No</th><th>Date</th><th>Invoice Total</th><th>Amount Applied</th></tr></thead>
 <tbody>{invoicesRows}</tbody>
 </table>
-<div style=""margin-top:12px;""><strong>Previous Balance:</strong> {dto.PreviousBalance:N2} AED &nbsp; <strong>Amount Paid:</strong> {dto.AmountPaid:N2} AED &nbsp; <strong>Remaining Balance:</strong> {dto.RemainingBalance:N2} AED</div>
+<div style=""margin-top:12px;""><strong>Previous Balance:</strong> {dto.PreviousBalance:N2} AED &nbsp; <strong>Amount Paid:</strong> {dto.AmountPaid:N2} AED &nbsp; <strong>{(dto.RemainingBalance < 0 ? "Credit (Balance in your favour):" : "Remaining Balance:")}</strong> {(dto.RemainingBalance < 0 ? (-dto.RemainingBalance).ToString("N2") : dto.RemainingBalance.ToString("N2"))} AED</div>
 <div style=""margin-top:24px;"">Received by: _______________________ &nbsp; For {dto.CompanyNameEn}</div>
 <div style=""margin-top:8px;font-size:10px;color:#666;"">This is a computer generated receipt.</div>
 </body></html>";

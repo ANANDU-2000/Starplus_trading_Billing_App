@@ -21,9 +21,10 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
     setError(null)
     const run = async () => {
       try {
-        const res = paymentIds.length === 1
-          ? await paymentsAPI.generateReceipt(paymentIds[0])
-          : await paymentsAPI.generateReceiptBatch(paymentIds)
+        const ids = paymentIds.length === 1 ? paymentIds : [...new Set(paymentIds)]
+        const res = ids.length === 1
+          ? await paymentsAPI.generateReceipt(ids[0])
+          : await paymentsAPI.generateReceiptBatch(ids)
         if (cancelled) return
         // API returns { success, data: PaymentReceiptDto, message }; receipt id is on the DTO
         const data = res?.data ?? res
@@ -74,10 +75,23 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
   }
 
   const handlePrint = () => {
-    const iframe = document.getElementById('receipt-preview-iframe')
-    if (iframe?.contentWindow) {
-      iframe.contentWindow.print()
+    if (!receiptHtml) return
+    const printWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes')
+    if (!printWindow) {
+      toast.error('Please allow pop-ups to print the receipt.')
+      return
     }
+    printWindow.document.write(receiptHtml)
+    printWindow.document.close()
+    printWindow.focus()
+    const doPrint = () => {
+      printWindow.print()
+      if (printWindow.onafterprint !== undefined) {
+        printWindow.onafterprint = () => printWindow.close()
+      }
+      setTimeout(() => { if (!printWindow.closed) printWindow.close() }, 1500)
+    }
+    setTimeout(doPrint, 250)
   }
 
   if (!isOpen) return null

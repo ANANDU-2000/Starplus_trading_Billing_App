@@ -213,13 +213,16 @@ const CustomerLedgerPage = () => {
     }
   }, [selectedCustomer?.id, dateRange.from, dateRange.to])
 
-  // Refresh data when window regains focus (e.g., returning from POS edit)
+  // Refresh data when window regains focus, but throttle to avoid repeated errors (e.g. schema/network)
+  const lastFocusRef = React.useRef(0)
   useEffect(() => {
     const handleFocus = () => {
-      if (selectedCustomer) {
-        loadCustomerData(selectedCustomer.id)
-        fetchCustomers() // Also refresh customer list to update balances
-      }
+      if (!selectedCustomer) return
+      const now = Date.now()
+      if (now - lastFocusRef.current < 15000) return // skip if we refetched in the last 15 seconds
+      lastFocusRef.current = now
+      loadCustomerData(selectedCustomer.id)
+      fetchCustomers()
     }
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)

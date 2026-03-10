@@ -424,7 +424,10 @@ namespace FrozenApi.Controllers
                     return Unauthorized(new ApiResponse<PaymentReceiptDto> { Success = false, Message = "Invalid user" });
                 if (request?.PaymentIds == null || request.PaymentIds.Count == 0)
                     return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = "At least one payment ID is required." });
-                var dto = await _receiptService.GenerateReceiptAsync(userId, request.PaymentIds.ToArray());
+                var ids = request.PaymentIds.Distinct().ToList();
+                if (ids.Count != request.PaymentIds.Count)
+                    return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = "Duplicate payment IDs are not allowed." });
+                var dto = await _receiptService.GenerateReceiptAsync(userId, ids.ToArray());
                 return Ok(new ApiResponse<PaymentReceiptDto> { Success = true, Data = dto, Message = "Receipt generated." });
             }
             catch (InvalidOperationException ex)
