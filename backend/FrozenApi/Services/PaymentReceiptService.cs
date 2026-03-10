@@ -55,8 +55,14 @@ namespace FrozenApi.Services
                 throw new InvalidOperationException("Cannot generate receipt: total payment amount must be greater than zero.");
 
             var customerId = payments.First().CustomerId;
-            if (payments.Any(p => p.CustomerId != customerId))
+            if (!customerId.HasValue || payments.Any(p => p.CustomerId != customerId))
                 throw new InvalidOperationException("All payments must belong to the same customer.");
+
+            foreach (var p in payments)
+            {
+                if (p.SaleId.HasValue && (p.Sale == null || p.Sale.IsDeleted))
+                    throw new InvalidOperationException("Cannot generate receipt: a payment references an invoice that is missing or deleted. Please correct the payment or invoice and try again.");
+            }
 
             // Only reuse an existing receipt when it contains exactly the same set of payments (no more, no less).
             var existingLink = await _context.PaymentReceiptPayments
@@ -304,7 +310,9 @@ namespace FrozenApi.Services
 
         private Task<string> BuildReceiptHtmlAsync(PaymentReceiptDto dto)
         {
-            var sortedInvoices = dto.Invoices.OrderBy(inv => inv.InvoiceDate).ThenBy(inv => inv.InvoiceNo).ToList();
+            var invoiceRows = dto.Invoices.Where(inv => inv.InvoiceNo != "Advance / On Account").OrderBy(inv => inv.InvoiceDate).ThenBy(inv => inv.InvoiceNo).ToList();
+            var advanceRows = dto.Invoices.Where(inv => inv.InvoiceNo == "Advance / On Account").OrderBy(inv => inv.InvoiceDate).ToList();
+            var sortedInvoices = invoiceRows.Concat(advanceRows).ToList();
             var rows = sortedInvoices.Select(inv => $@"
                 <tr>
                     <td>{inv.InvoiceNo}</td>
