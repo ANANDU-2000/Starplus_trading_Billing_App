@@ -206,6 +206,54 @@ using (var migrateScope = app.Services.CreateScope())
     }
 }
 
+// Auto-apply missing schema on PostgreSQL (fixes production when migrations were never run or history out of sync)
+using (var schemaScope = app.Services.CreateScope())
+{
+    var schemaLogger = schemaScope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SchemaFix");
+    try
+    {
+        var dbContext = schemaScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (dbContext.Database.IsNpgsql())
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var possiblePaths = new[]
+            {
+                Path.Combine(baseDir, "Scripts", "ApplyMissingSchema.sql"),
+                Path.Combine(Directory.GetCurrentDirectory(), "Scripts", "ApplyMissingSchema.sql"),
+                Path.Combine(baseDir, "..", "Scripts", "ApplyMissingSchema.sql"),
+                Path.Combine(baseDir, "..", "..", "Scripts", "ApplyMissingSchema.sql")
+            };
+            string? scriptPath = null;
+            foreach (var p in possiblePaths)
+            {
+                if (File.Exists(p)) { scriptPath = p; break; }
+            }
+            if (!string.IsNullOrEmpty(scriptPath))
+            {
+                var scriptSql = await File.ReadAllTextAsync(scriptPath);
+                var connStr = dbContext.Database.GetConnectionString();
+                if (!string.IsNullOrEmpty(connStr))
+                {
+                    await using (var conn = new Npgsql.NpgsqlConnection(connStr))
+                    {
+                        await conn.OpenAsync();
+                        await using (var cmd = new Npgsql.NpgsqlCommand(scriptSql, conn))
+                        {
+                            cmd.CommandTimeout = 120;
+                            await cmd.ExecuteNonQueryAsync();
+                        }
+                    }
+                    schemaLogger.LogInformation("ApplyMissingSchema.sql executed successfully (missing columns/tables added if any).");
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        schemaLogger.LogWarning(ex, "ApplyMissingSchema.sql failed (non-fatal): {Message}. If you see 42703/missing column, run the script manually on your Postgres.", ex.Message);
+    }
+}
+
 // Configure URLs - Support Render deployment (PORT env var) and local development
 app.Urls.Clear();
 var serverPort = Environment.GetEnvironmentVariable("PORT");

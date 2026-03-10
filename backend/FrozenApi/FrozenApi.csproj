@@ -33,8 +33,12 @@ Date: 2024
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Ensure SQL files in Migrations folder are copied to published output -->
+    <!-- Ensure SQL files in Migrations and Scripts folders are copied to published output -->
     <Content Include="Migrations\*.sql">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="Scripts\*.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>

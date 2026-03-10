@@ -7,12 +7,15 @@
 
 ### ⚠️ If you see "Failed to load customer data" / "column s.RoundOff does not exist" / "Failed to load expense categories"
 
-Your **production database is missing schema**. Run this **once**:
+Your **production database is missing schema**.
 
+**Easiest fix:** **Redeploy the backend** on Render. The app now runs `ApplyMissingSchema.sql` automatically on startup when using PostgreSQL, so one redeploy should add the missing columns/tables and fix the errors.
+
+**If redeploy doesn’t fix it**, run the script manually once:
 1. Open **[Render Dashboard](https://dashboard.render.com/)** → select your **PostgreSQL** service.
 2. Click **Connect** (or use the **PSQL Command** / **External Database URL**).
 3. Copy the **entire contents** of `backend/FrozenApi/Scripts/ApplyMissingSchema.sql` from this repo and paste into the PSQL session, then run it.
-4. Reload your app. Customer data, sales report, and expense categories should load.
+4. Reload your app.
 
 (See [Issue 6: Schema outdated](#issue-6-schema-outdated-roundoff--missing-column) in Troubleshooting for details.)
 
