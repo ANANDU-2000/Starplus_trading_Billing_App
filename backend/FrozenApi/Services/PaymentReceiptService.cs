@@ -140,8 +140,11 @@ namespace FrozenApi.Services
             var companyTrn = settings.GetValueOrDefault("COMPANY_TRN") ?? "";
             var companyPhone = settings.GetValueOrDefault("COMPANY_PHONE") ?? "";
 
-            // Previous/remaining balance: use CLEARED payments only (matches BalanceService and customer ledger logic)
+            // Previous/remaining balance: Sales - CLEARED payments - Sales returns (matches BalanceService and CustomerService)
             decimal previousBalance = 0;
+            decimal currentTotalOutstanding = 0;
+            var currentOutstandingAsOfDate = DateTime.UtcNow.Date;
+            int pendingBillsCount = 0;
             if (customerId.HasValue)
             {
                 var asOfDate = payments.Min(p => p.PaymentDate);
@@ -151,7 +154,45 @@ namespace FrozenApi.Services
                 var paymentsBefore = await _context.Payments
                     .Where(p => p.CustomerId == customerId && p.PaymentDate < asOfDate && p.Status == PaymentStatus.CLEARED)
                     .SumAsync(p => p.Amount);
-                previousBalance = salesBefore - paymentsBefore;
+                var returnsBefore = await _context.SaleReturns
+                    .Where(sr => sr.CustomerId == customerId && sr.ReturnDate < asOfDate)
+                    .SumAsync(sr => sr.GrandTotal);
+                previousBalance = salesBefore - paymentsBefore - returnsBefore;
+
+                // Current total outstanding (as of today): same formula as BalanceService / CustomerService
+                var totalSales = await _context.Sales
+                    .Where(s => s.CustomerId == customerId && !s.IsDeleted)
+                    .SumAsync(s => (decimal?)s.GrandTotal) ?? 0m;
+                var totalPayments = await _context.Payments
+                    .Where(p => p.CustomerId == customerId && p.Status == PaymentStatus.CLEARED)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+                var totalReturns = await _context.SaleReturns
+                    .Where(sr => sr.CustomerId == customerId)
+                    .SumAsync(sr => (decimal?)sr.GrandTotal) ?? 0m;
+                currentTotalOutstanding = totalSales - totalPayments - totalReturns;
+
+                // Pending bills: count of invoices that still have outstanding balance
+                var customerSales = await _context.Sales
+                    .Where(s => s.CustomerId == customerId && !s.IsDeleted)
+                    .Select(s => new { s.Id, s.GrandTotal })
+                    .ToListAsync();
+                var paidBySale = await _context.Payments
+                    .Where(p => p.CustomerId == customerId && p.SaleId != null && p.Status == PaymentStatus.CLEARED)
+                    .GroupBy(p => p.SaleId!.Value)
+                    .Select(g => new { SaleId = g.Key, Total = g.Sum(p => p.Amount) })
+                    .ToDictionaryAsync(x => x.SaleId, x => x.Total);
+                var returnsBySale = await _context.SaleReturns
+                    .Where(sr => sr.CustomerId == customerId)
+                    .GroupBy(sr => sr.SaleId)
+                    .Select(g => new { SaleId = g.Key, Total = g.Sum(sr => sr.GrandTotal) })
+                    .ToDictionaryAsync(x => x.SaleId, x => x.Total);
+                foreach (var s in customerSales)
+                {
+                    var paid = paidBySale.GetValueOrDefault(s.Id, 0m);
+                    var returns = returnsBySale.GetValueOrDefault(s.Id, 0m);
+                    var outstanding = s.GrandTotal - paid - returns;
+                    if (outstanding > 0.001m) pendingBillsCount++;
+                }
             }
             var remainingBalance = previousBalance - totalAmount;
 
@@ -203,6 +244,9 @@ namespace FrozenApi.Services
                 PreviousBalance = previousBalance,
                 AmountPaid = totalAmount,
                 RemainingBalance = remainingBalance,
+                CurrentTotalOutstanding = currentTotalOutstanding,
+                CurrentOutstandingAsOfDate = currentOutstandingAsOfDate,
+                PendingBillsCount = pendingBillsCount,
                 IsReprint = isReprint
             };
         }
@@ -275,7 +319,16 @@ th{{background:#f0f0f0;}}
 <thead><tr><th>Invoice No</th><th>Date</th><th>Invoice Total</th><th>Amount Applied</th></tr></thead>
 <tbody>{invoicesRows}</tbody>
 </table>
-<div style=""margin-top:12px;""><strong>Previous Balance:</strong> {dto.PreviousBalance:N2} AED &nbsp; <strong>Amount Paid:</strong> {dto.AmountPaid:N2} AED &nbsp; <strong>{(dto.RemainingBalance < 0 ? "Credit (Balance in your favour):" : "Remaining Balance:")}</strong> {(dto.RemainingBalance < 0 ? (-dto.RemainingBalance).ToString("N2") : dto.RemainingBalance.ToString("N2"))} AED</div>
+<div style=""margin-top:12px;"">
+<strong>Previous balance (before these payments):</strong> {dto.PreviousBalance:N2} AED<br/>
+<strong>Amount paid (this receipt):</strong> {dto.AmountPaid:N2} AED<br/>
+<strong>{(dto.RemainingBalance < 0 ? "Credit (balance in your favour)" : "Balance after this receipt (as of " + dto.GeneratedAt.ToString("dd-MM-yyyy") + "):")}</strong> {(dto.RemainingBalance < 0 ? (-dto.RemainingBalance).ToString("N2") : dto.RemainingBalance.ToString("N2"))} AED
+</div>
+<div style=""margin-top:10px;padding:8px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;"">
+<strong>Customer summary (as of {dto.CurrentOutstandingAsOfDate:dd-MM-yyyy}):</strong><br/>
+Pending bills: {dto.PendingBillsCount} &nbsp; | &nbsp; Total outstanding: {dto.CurrentTotalOutstanding:N2} AED
+</div>
+<div style=""margin-top:8px;font-size:11px;color:#555;"">Invoices on this receipt: {dto.Invoices.Count} &nbsp; | &nbsp; Generated on {dto.GeneratedAt:dd-MM-yyyy HH:mm}</div>
 <div style=""margin-top:24px;"">Received by: _______________________ &nbsp; For {dto.CompanyNameEn}</div>
 <div style=""margin-top:8px;font-size:10px;color:#666;"">This is a computer generated receipt.</div>
 </body></html>";

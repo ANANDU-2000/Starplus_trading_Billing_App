@@ -904,6 +904,12 @@ namespace FrozenApi.Models
         public decimal PreviousBalance { get; set; }
         public decimal AmountPaid { get; set; }
         public decimal RemainingBalance { get; set; }
+        /// <summary>Customer's actual total outstanding as of today (Sales - CLEARED Payments - Returns). Matches ledger/customer total.</summary>
+        public decimal CurrentTotalOutstanding { get; set; }
+        /// <summary>Date as of which CurrentTotalOutstanding was calculated.</summary>
+        public DateTime CurrentOutstandingAsOfDate { get; set; }
+        /// <summary>Number of invoices (bills) that still have outstanding balance for this customer.</summary>
+        public int PendingBillsCount { get; set; }
         public bool IsReprint { get; set; }
     }
 
