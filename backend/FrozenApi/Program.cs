@@ -178,6 +178,32 @@ var fontService = app.Services.GetRequiredService<IFontService>();
 fontService.RegisterFonts();
 appLogger.LogInformation("Font registration completed. Arabic font: {Font}", fontService.GetArabicFontFamily());
 
+// Apply pending EF migrations at startup (no shell needed on Render)
+using (var migrateScope = app.Services.CreateScope())
+{
+    var migrateLogger = migrateScope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Migrate");
+    try
+    {
+        var dbContext = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pending = dbContext.Database.GetPendingMigrations().ToList();
+        if (pending.Any())
+        {
+            migrateLogger.LogInformation("Applying {Count} pending migration(s): {Migrations}", pending.Count, string.Join(", ", pending));
+            dbContext.Database.Migrate();
+            migrateLogger.LogInformation("Migrations applied successfully");
+        }
+        else
+        {
+            migrateLogger.LogInformation("Database is up to date (no pending migrations)");
+        }
+    }
+    catch (Exception ex)
+    {
+        migrateLogger.LogError(ex, "Migration failed: {Message}", ex.Message);
+        throw;
+    }
+}
+
 // Configure URLs - Support Render deployment (PORT env var) and local development
 app.Urls.Clear();
 var serverPort = Environment.GetEnvironmentVariable("PORT");
