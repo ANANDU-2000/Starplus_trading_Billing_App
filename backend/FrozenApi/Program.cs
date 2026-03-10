@@ -17,6 +17,8 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.AspNetCore.Diagnostics;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -221,6 +223,37 @@ else
 }
 
 // Configure the HTTP request pipeline.
+// Global exception handler: return clear message when DB schema is outdated (missing column / 42703)
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var feature = context.Features.Get<IExceptionHandlerFeature>();
+        var ex = feature?.Error;
+        if (ex != null && IsSchemaOutdatedException(ex))
+        {
+            context.Response.StatusCode = 503;
+            context.Response.ContentType = "application/json";
+            const string message = "Database schema outdated. Please run ApplyMissingSchema.sql on your database or redeploy so migrations can run.";
+            await context.Response.WriteAsJsonAsync(new { error = message });
+            return;
+        }
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new { error = "An error occurred." });
+    });
+});
+
+static bool IsSchemaOutdatedException(Exception ex)
+{
+    for (var e = ex; e != null; e = e.InnerException)
+    {
+        if (e is PostgresException pg && pg.SqlState == "42703") return true;
+        if (e.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase) || e.Message.Contains("MissingColumn", StringComparison.OrdinalIgnoreCase)) return true;
+    }
+    return false;
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

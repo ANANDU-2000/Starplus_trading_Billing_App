@@ -423,6 +423,24 @@ password authentication failed
    ```
 3. If missing, redeploy to re-run migrations
 
+### Issue 6: Schema outdated (RoundOff / missing column)
+
+**Symptom:** API errors such as:
+- `42703: column s.RoundOff does not exist`
+- "Failed to load customer data" or "Failed to load expense categories"
+- `DbUpdateException` or missing-column / `errorMissingColumn` in reports, customer ledger, or expenses
+
+**Cause:** The production database is behind the app schema (migrations were not applied—e.g. `__EFMigrationsHistory` out of sync or app never ran `Database.Migrate()`).
+
+**Solution:** Run the one-time schema script once against your Render Postgres:
+
+1. Open [Render Dashboard](https://dashboard.render.com/) → your **PostgreSQL** service.
+2. Use **Connect** (or the "External Database URL" / "PSQL Command").
+3. Run the contents of `backend/FrozenApi/Scripts/ApplyMissingSchema.sql` (e.g. paste into the PSQL session or run `psql $DATABASE_URL -f backend/FrozenApi/Scripts/ApplyMissingSchema.sql` from a shell with the file and URL).
+4. Reload the app; customer data, sales report (with RoundOff), expense categories, and payment receipts should load without 42703 or missing-column errors.
+
+After this, normal deploys keep the schema in sync via startup `Database.Migrate()` as long as the web service is the latest code and uses the same `DATABASE_URL`.
+
 ---
 
 ## Production Checklist
