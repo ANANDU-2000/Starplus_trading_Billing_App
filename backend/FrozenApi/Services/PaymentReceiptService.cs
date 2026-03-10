@@ -304,7 +304,8 @@ namespace FrozenApi.Services
 
         private Task<string> BuildReceiptHtmlAsync(PaymentReceiptDto dto)
         {
-            var rows = dto.Invoices.Select(inv => $@"
+            var sortedInvoices = dto.Invoices.OrderBy(inv => inv.InvoiceDate).ThenBy(inv => inv.InvoiceNo).ToList();
+            var rows = sortedInvoices.Select(inv => $@"
                 <tr>
                     <td>{inv.InvoiceNo}</td>
                     <td>{inv.InvoiceDate:dd-MM-yyyy}</td>
@@ -326,7 +327,7 @@ th{{background:#f0f0f0;}}
 <div style=""margin-top:12px;""><strong>Receipt No:</strong> {dto.ReceiptNumber} &nbsp; <strong>Date:</strong> {dto.GeneratedAt:dd-MM-yyyy}</div>
 <div style=""margin-top:8px;"">{dto.CompanyNameEn}<br/>{dto.CompanyAddress} | TRN: {dto.CompanyTrn} | {dto.CompanyPhone}</div>
 <div style=""margin-top:12px;""><strong>Received From:</strong> {dto.CustomerName}<br/>TRN: {dto.CustomerTrn ?? "-"}<br/>{dto.CustomerAddress ?? ""}</div>
-<div style=""margin-top:8px;""><strong>Payment Method:</strong> {string.Join(", ", dto.Payments.Select(p => p.Method + (p.Reference != null ? " - " + p.Reference : "")))}</div>
+<div style=""margin-top:8px;""><strong>Payment Method:</strong> {string.Join(", ", dto.Payments.Select(p => p.Method).Distinct())}</div>
 <div style=""margin-top:6px;font-size:13px;""><strong>Payment date(s):</strong> {string.Join(", ", dto.Payments.Select(p => p.PaymentDate.ToString("dd-MM-yyyy")).Distinct())}</div>
 <table style=""margin-top:12px;"">
 <thead><tr><th>Invoice No</th><th>Invoice Date</th><th>Invoice Total</th><th>Paid Amount</th></tr></thead>
