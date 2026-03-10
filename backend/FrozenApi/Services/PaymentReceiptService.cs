@@ -60,6 +60,10 @@ namespace FrozenApi.Services
                 }
             }
 
+            var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
+            if (!userExists)
+                throw new InvalidOperationException("User not found. Cannot generate receipt.");
+
             var receiptNumber = await _receiptNumberService.GenerateNextReceiptNumberAsync();
 
             var receipt = new PaymentReceipt
@@ -69,17 +73,29 @@ namespace FrozenApi.Services
                 GeneratedByUserId = userId
             };
             _context.PaymentReceipts.Add(receipt);
-            await _context.SaveChangesAsync();
 
-            foreach (var p in payments)
+            await using (var transaction = await _context.Database.BeginTransactionAsync())
             {
-                _context.PaymentReceiptPayments.Add(new PaymentReceiptPayment
+                try
                 {
-                    PaymentReceiptId = receipt.Id,
-                    PaymentId = p.Id
-                });
+                    await _context.SaveChangesAsync();
+                    foreach (var p in payments)
+                    {
+                        _context.PaymentReceiptPayments.Add(new PaymentReceiptPayment
+                        {
+                            PaymentReceiptId = receipt.Id,
+                            PaymentId = p.Id
+                        });
+                    }
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
             }
-            await _context.SaveChangesAsync();
 
             return await BuildReceiptDtoAsync(receipt.Id, false);
         }

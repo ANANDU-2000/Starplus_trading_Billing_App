@@ -6,6 +6,7 @@ Updated: 2025 - Complete rewrite per spec for proper payment/invoice/balance tra
 */
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using FrozenApi.Services;
 using FrozenApi.Models;
 
@@ -430,6 +431,11 @@ namespace FrozenApi.Controllers
             {
                 return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message });
             }
+            catch (DbUpdateException ex)
+            {
+                var inner = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new ApiResponse<PaymentReceiptDto> { Success = false, Message = "Could not save receipt. Please try again.", Errors = new List<string> { inner } });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message, Errors = new List<string> { ex.Message } });
@@ -452,6 +458,11 @@ namespace FrozenApi.Controllers
             catch (InvalidOperationException ex)
             {
                 return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message });
+            }
+            catch (DbUpdateException ex)
+            {
+                var inner = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new ApiResponse<PaymentReceiptDto> { Success = false, Message = "Could not save receipt. Please try again.", Errors = new List<string> { inner } });
             }
             catch (Exception ex)
             {
