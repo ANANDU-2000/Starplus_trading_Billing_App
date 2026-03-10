@@ -20,6 +20,7 @@ import toast from 'react-hot-toast'
 import { LoadingCard, LoadingButton } from '../components/Loading'
 import { Input, Select, TextArea } from '../components/Form'
 import Modal from '../components/Modal'
+import BulkVatUpdateModal from '../components/BulkVatUpdateModal'
 import { expensesAPI } from '../services'
 import { 
   PieChart as RechartsPieChart,
@@ -48,27 +49,33 @@ const ExpensesPage = () => {
   const [groupBy, setGroupBy] = useState('') // '', 'weekly', 'monthly', 'yearly'
   const [showAggregated, setShowAggregated] = useState(false)
   const [aggregatedData, setAggregatedData] = useState([])
+  const [noVatOnly, setNoVatOnly] = useState(false)
+  const [noVatCount, setNoVatCount] = useState(0)
+  const [showBulkVatModal, setShowBulkVatModal] = useState(false)
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState([])
+  const [showCategoryVatModal, setShowCategoryVatModal] = useState(false)
+  const [updatingCategoryId, setUpdatingCategoryId] = useState(null)
+  const [categoryVatEdits, setCategoryVatEdits] = useState({})
   
-  const [categories, setCategories] = useState([])
+  const [categories, setCategories] = useState([]) // full list { id, name, colorCode, defaultVatRate, ... }
 
   const {
     register,
     handleSubmit,
     reset,
     setValue,
+    watch,
     formState: { errors }
   } = useForm()
+  const watchedCategoryId = watch('category')
+  const selectedCategory = categories.find((c) => String(c.id) === String(watchedCategoryId))
+  const categoryVatLocked = selectedCategory?.vatDefaultLocked ?? false
 
   const fetchCategories = useCallback(async () => {
     try {
       const response = await expensesAPI.getExpenseCategories()
       if (response?.success && response?.data && Array.isArray(response.data)) {
-        const categoryOptions = response.data.map(cat => ({ 
-          value: cat.id, 
-          label: cat.name,
-          color: cat.colorCode
-        }))
-        setCategories(categoryOptions)
+        setCategories(response.data)
       } else {
         setCategories([])
       }
@@ -79,6 +86,14 @@ const ExpensesPage = () => {
     }
   }, [])
 
+  const categoryOptions = categories.map(cat => ({
+    value: cat.id,
+    label: cat.defaultVatRate != null && cat.defaultVatRate > 0
+      ? `${cat.name} (${(cat.defaultVatRate * 100)}% VAT${cat.defaultIsTaxClaimable ? ', Claimable' : ''})`
+      : cat.name,
+    color: cat.colorCode
+  }))
+
 
   const fetchExpenses = useCallback(async () => {
     try {
@@ -87,7 +102,8 @@ const ExpensesPage = () => {
         page: currentPage,
         pageSize: 10,
         fromDate: dateRange.from,
-        toDate: dateRange.to
+        toDate: dateRange.to,
+        ...(noVatOnly ? { noVatOnly: true } : {})
       }
       
       // Fetch aggregated view if enabled
@@ -122,11 +138,12 @@ const ExpensesPage = () => {
         setExpenses(expenseList)
         setFilteredExpenses(expenseList)
         setTotalPages(response.data.totalPages || 1)
+        if (noVatOnly) setNoVatCount(response.data.totalCount ?? 0)
         
-        const total = expenseList.reduce((sum, expense) => sum + (expense.amount || 0), 0)
+        const total = expenseList.reduce((sum, expense) => sum + (expense.totalAmount ?? expense.amount ?? 0), 0)
         const categoryTotals = expenseList.reduce((acc, expense) => {
           const cat = expense.categoryName || 'Other'
-          acc[cat] = (acc[cat] || 0) + (expense.amount || 0)
+          acc[cat] = (acc[cat] || 0) + (expense.totalAmount ?? expense.amount ?? 0)
           return acc
         }, {})
         
@@ -155,7 +172,7 @@ const ExpensesPage = () => {
     } finally {
       setLoading(false)
     }
-  }, [currentPage, dateRange, showAggregated, groupBy])
+  }, [currentPage, dateRange, showAggregated, groupBy, noVatOnly])
 
   const filterExpenses = useCallback(() => {
     if (!searchTerm) {
@@ -176,20 +193,58 @@ const ExpensesPage = () => {
   }, [fetchCategories, fetchExpenses])
 
   useEffect(() => {
+    if (!noVatOnly) {
+      expensesAPI.getExpenses({ noVatOnly: true, pageSize: 1, page: 1 }).then((r) => {
+        if (r?.success && r?.data) setNoVatCount(r.data.totalCount ?? 0)
+      }).catch(() => setNoVatCount(0))
+    }
+  }, [noVatOnly])
+
+  useEffect(() => {
+    if (showCategoryVatModal && categories.length > 0) {
+      setCategoryVatEdits(categories.reduce((acc, c) => ({
+        ...acc,
+        [c.id]: {
+          defaultVatRate: c.defaultVatRate ?? 0,
+          defaultTaxType: c.defaultTaxType ?? 'Standard',
+          defaultIsTaxClaimable: c.defaultIsTaxClaimable ?? false,
+          defaultIsEntertainment: c.defaultIsEntertainment ?? false,
+          vatDefaultLocked: c.vatDefaultLocked ?? false
+        }
+      }), {}))
+    }
+  }, [showCategoryVatModal, categories])
+
+  useEffect(() => {
     filterExpenses()
   }, [filterExpenses])
+
+  useEffect(() => {
+    if (selectedCategory && (showAddModal || showEditModal)) {
+      setValue('vatRate', selectedCategory.defaultVatRate ?? 0)
+      setValue('taxType', selectedCategory.defaultTaxType ?? 'Standard')
+      setValue('isTaxClaimable', selectedCategory.defaultIsTaxClaimable ?? false)
+      setValue('isEntertainment', selectedCategory.defaultIsEntertainment ?? false)
+    }
+  }, [watchedCategoryId, selectedCategory, showAddModal, showEditModal, setValue])
 
   const onSubmit = async (data) => {
     try {
       const expenseDate = data.date ? new Date(data.date).toISOString() : new Date().toISOString()
-      
+      const payload = {
+        categoryId: parseInt(data.category),
+        amount: parseFloat(data.amount),
+        date: expenseDate,
+        note: data.note || ''
+      }
+      if (!categoryVatLocked) {
+        if (data.vatRate != null && data.vatRate !== '') payload.vatRate = parseFloat(data.vatRate)
+        if (data.taxType) payload.taxType = data.taxType
+        if (data.isTaxClaimable !== undefined) payload.isTaxClaimable = !!data.isTaxClaimable
+        if (data.isEntertainment !== undefined) payload.isEntertainment = !!data.isEntertainment
+      }
       if (selectedExpense) {
-        const response = await expensesAPI.updateExpense(selectedExpense.id, {
-          categoryId: parseInt(data.category),
-          amount: parseFloat(data.amount),
-          date: expenseDate,
-          note: data.note || ''
-        })
+        const response = await expensesAPI.updateExpense(selectedExpense.id, payload)
         
         if (response?.success) {
           toast.success('Expense updated successfully!')
@@ -198,12 +253,7 @@ const ExpensesPage = () => {
           return
         }
       } else {
-        const response = await expensesAPI.createExpense({
-          categoryId: parseInt(data.category),
-          amount: parseFloat(data.amount),
-          date: expenseDate,
-          note: data.note || ''
-        })
+        const response = await expensesAPI.createExpense(payload)
         
         if (response?.success) {
           toast.success('Expense added successfully!')
@@ -228,12 +278,16 @@ const ExpensesPage = () => {
   const handleEdit = (expense) => {
     setSelectedExpense(expense)
     setValue('category', expense.categoryId || '')
-    setValue('amount', expense.amount || 0)
-    const expenseDate = expense.date 
+    setValue('amount', expense.amount ?? 0)
+    const expenseDate = expense.date
       ? new Date(expense.date).toISOString().split('T')[0]
       : new Date().toISOString().split('T')[0]
     setValue('date', expenseDate)
     setValue('note', expense.note || '')
+    setValue('vatRate', expense.vatRate ?? '')
+    setValue('taxType', expense.taxType || 'Standard')
+    setValue('isTaxClaimable', expense.isTaxClaimable ?? false)
+    setValue('isEntertainment', expense.isEntertainment ?? false)
     setShowEditModal(true)
   }
 
@@ -367,6 +421,30 @@ const ExpensesPage = () => {
             </button>
           </div>
           
+          <div className="flex flex-wrap gap-2 mb-3 items-center">
+            <span className="text-sm font-medium text-gray-700">VAT filter:</span>
+            <button
+              type="button"
+              onClick={() => setNoVatOnly(false)}
+              className={`px-2 py-1 text-xs rounded ${!noVatOnly ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => setNoVatOnly(true)}
+              className={`px-2 py-1 text-xs rounded ${noVatOnly ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+            >
+              No VAT data
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCategoryVatModal(true)}
+              className="ml-2 px-2 py-1 text-xs bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+            >
+              Category VAT defaults
+            </button>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Input
               label="From Date"
@@ -398,6 +476,21 @@ const ExpensesPage = () => {
             </div>
           </div>
         </div>
+
+        {noVatCount > 0 && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-wrap items-center gap-2">
+            <span className="text-sm text-amber-800">
+              {noVatCount} expense(s) have no VAT data.
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowBulkVatModal(true)}
+              className="px-3 py-1.5 text-sm font-medium bg-amber-600 text-white rounded hover:bg-amber-700"
+            >
+              Review & Update
+            </button>
+          </div>
+        )}
         
         {/* Summary Cards - Mobile Responsive */}
         {expenseSummary && (
@@ -546,13 +639,25 @@ const ExpensesPage = () => {
         {/* Expenses Table - Tally Ledger Style */}
         {!showAggregated && (
           <div className="bg-white rounded-lg border-2 border-lime-300 shadow-sm overflow-hidden">
-            <div className="p-3 border-b-2 border-lime-400 bg-lime-100">
+            <div className="p-3 border-b-2 border-lime-400 bg-lime-100 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-gray-900">Expenses Ledger</h3>
+              {noVatOnly && selectedExpenseIds.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-700">{selectedExpenseIds.length} selected</span>
+                  <button type="button" onClick={() => setShowBulkVatModal(true)} className="px-2 py-1 text-xs font-medium bg-amber-600 text-white rounded hover:bg-amber-700">Apply VAT</button>
+                  <button type="button" onClick={() => setSelectedExpenseIds([])} className="px-2 py-1 text-xs border border-lime-400 rounded hover:bg-lime-100">Clear</button>
+                </div>
+              )}
             </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
               <thead className="bg-lime-100">
                 <tr>
+                  {noVatOnly && (
+                    <th className="px-2 py-3 text-center font-semibold text-gray-700 border-r border-lime-300 w-10">
+                      <input type="checkbox" checked={filteredExpenses.length > 0 && filteredExpenses.every((e) => selectedExpenseIds.includes(e.id))} onChange={(e) => setSelectedExpenseIds(e.target.checked ? filteredExpenses.map((e) => e.id) : [])} className="rounded" />
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-left font-semibold text-gray-700 border-r border-lime-300">Category</th>
                   <th className="px-4 py-3 text-right font-semibold text-gray-700 border-r border-lime-300">Amount</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700 border-r border-lime-300">Date</th>
@@ -563,13 +668,18 @@ const ExpensesPage = () => {
               <tbody className="divide-y divide-lime-200">
                 {filteredExpenses.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={noVatOnly ? 6 : 5} className="px-6 py-8 text-center text-gray-500">
                       No expenses found
                     </td>
                   </tr>
                 ) : (
                   filteredExpenses.map((expense) => (
                   <tr key={expense.id} className="hover:bg-lime-50">
+                    {noVatOnly && (
+                      <td className="px-2 py-4 text-center border-r border-lime-200">
+                        <input type="checkbox" checked={selectedExpenseIds.includes(expense.id)} onChange={() => setSelectedExpenseIds((prev) => prev.includes(expense.id) ? prev.filter((id) => id !== expense.id) : [...prev, expense.id])} className="rounded" />
+                      </td>
+                    )}
                     <td className="px-4 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div 
@@ -580,7 +690,7 @@ const ExpensesPage = () => {
                       </div>
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap text-right font-medium text-gray-900">
-                      {formatCurrency(expense.amount)}
+                      {formatCurrency(expense.totalAmount ?? expense.amount)}
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap text-gray-900">
                       {expense.date ? new Date(expense.date).toLocaleDateString('en-GB') : '-'}
@@ -689,7 +799,7 @@ const ExpensesPage = () => {
                 </button>
               </div>
               <Select
-                options={categories}
+                options={categoryOptions}
                 required
                 error={errors.category?.message}
                 {...register('category', { required: 'Category is required' })}
@@ -724,6 +834,35 @@ const ExpensesPage = () => {
               error={errors.note?.message}
               {...register('note')}
             />
+
+            {watchedCategoryId && (
+              categoryVatLocked ? (
+                <p className="text-sm text-gray-600 bg-blue-50 px-3 py-2 rounded">
+                  VAT auto-set from category default (e.g. {(selectedCategory?.defaultVatRate ?? 0) * 100}%, {selectedCategory?.defaultIsTaxClaimable ? 'Claimable' : 'Non-claimable'})
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 border-t border-lime-200 pt-3">
+                  <Input label="VAT Rate (0–1)" type="number" step="0.01" min="0" max="1" {...register('vatRate')} />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tax Type</label>
+                    <select {...register('taxType')} className="w-full border-2 border-lime-300 rounded px-3 py-2 text-sm">
+                      <option value="Standard">Standard</option>
+                      <option value="Exempt">Exempt</option>
+                      <option value="OutOfScope">Out of Scope</option>
+                      <option value="Petroleum">Petroleum</option>
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 col-span-2">
+                    <input type="checkbox" {...register('isTaxClaimable')} />
+                    <span className="text-sm text-gray-700">ITC Claimable</span>
+                  </label>
+                  <label className="flex items-center gap-2 col-span-2">
+                    <input type="checkbox" {...register('isEntertainment')} />
+                    <span className="text-sm text-gray-700">Entertainment</span>
+                  </label>
+                </div>
+              )
+            )}
           </div>
 
           <div className="flex justify-end space-x-3">
@@ -801,7 +940,7 @@ const ExpensesPage = () => {
                 </button>
               </div>
               <Select
-                options={categories}
+                options={categoryOptions}
                 required
                 error={errors.category?.message}
                 {...register('category', { required: 'Category is required' })}
@@ -836,6 +975,43 @@ const ExpensesPage = () => {
               error={errors.note?.message}
               {...register('note')}
             />
+
+            {selectedExpense?.vatRate == null && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded flex flex-wrap items-center gap-2">
+                <span className="text-sm text-amber-800">No VAT data.</span>
+                <button type="button" onClick={() => { setSelectedExpenseIds([selectedExpense.id]); setShowBulkVatModal(true) }} className="px-2 py-1 text-sm bg-amber-600 text-white rounded hover:bg-amber-700">Add 5% VAT</button>
+                <span className="text-xs text-amber-700">or keep as no VAT and save.</span>
+              </div>
+            )}
+
+            {watchedCategoryId && (
+              categoryVatLocked ? (
+                <p className="text-sm text-gray-600 bg-blue-50 px-3 py-2 rounded">
+                  VAT auto-set from category default (e.g. {(selectedCategory?.defaultVatRate ?? 0) * 100}%, {selectedCategory?.defaultIsTaxClaimable ? 'Claimable' : 'Non-claimable'})
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 border-t border-lime-200 pt-3">
+                  <Input label="VAT Rate (0–1)" type="number" step="0.01" min="0" max="1" {...register('vatRate')} />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tax Type</label>
+                    <select {...register('taxType')} className="w-full border-2 border-lime-300 rounded px-3 py-2 text-sm">
+                      <option value="Standard">Standard</option>
+                      <option value="Exempt">Exempt</option>
+                      <option value="OutOfScope">Out of Scope</option>
+                      <option value="Petroleum">Petroleum</option>
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 col-span-2">
+                    <input type="checkbox" {...register('isTaxClaimable')} />
+                    <span className="text-sm text-gray-700">ITC Claimable</span>
+                  </label>
+                  <label className="flex items-center gap-2 col-span-2">
+                    <input type="checkbox" {...register('isEntertainment')} />
+                    <span className="text-sm text-gray-700">Entertainment</span>
+                  </label>
+                </div>
+              )
+            )}
           </div>
 
           <div className="flex justify-end space-x-3">
@@ -860,6 +1036,80 @@ const ExpensesPage = () => {
           </div>
         </form>
       </Modal>
+
+      <Modal isOpen={showCategoryVatModal} onClose={() => setShowCategoryVatModal(false)} title="Category VAT defaults" size="lg">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead className="bg-lime-100">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold text-gray-700">Category</th>
+                <th className="px-3 py-2 text-right font-semibold text-gray-700">VAT Rate</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-700">Tax Type</th>
+                <th className="px-3 py-2 text-center font-semibold text-gray-700">Claimable</th>
+                <th className="px-3 py-2 text-center font-semibold text-gray-700">Entertainment</th>
+                <th className="px-3 py-2 text-center font-semibold text-gray-700">Lock</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-lime-200">
+              {categories.map((cat) => {
+                const edit = categoryVatEdits[cat.id] || {}
+                return (
+                  <tr key={cat.id} className="hover:bg-lime-50">
+                    <td className="px-3 py-2 font-medium">{cat.name}</td>
+                    <td className="px-3 py-2">
+                      <input type="number" step="0.01" min="0" max="1" className="w-16 border border-lime-300 rounded px-2 py-1 text-right" value={edit.defaultVatRate ?? ''} onChange={(e) => setCategoryVatEdits((prev) => ({ ...prev, [cat.id]: { ...prev[cat.id], defaultVatRate: parseFloat(e.target.value) || 0 } }))} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select className="w-full border border-lime-300 rounded px-2 py-1" value={edit.defaultTaxType ?? 'Standard'} onChange={(e) => setCategoryVatEdits((prev) => ({ ...prev, [cat.id]: { ...prev[cat.id], defaultTaxType: e.target.value } }))}>
+                        <option value="Standard">Standard</option>
+                        <option value="Exempt">Exempt</option>
+                        <option value="OutOfScope">Out of Scope</option>
+                        <option value="Petroleum">Petroleum</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input type="checkbox" checked={!!edit.defaultIsTaxClaimable} onChange={(e) => setCategoryVatEdits((prev) => ({ ...prev, [cat.id]: { ...prev[cat.id], defaultIsTaxClaimable: e.target.checked } }))} />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input type="checkbox" checked={!!edit.defaultIsEntertainment} onChange={(e) => setCategoryVatEdits((prev) => ({ ...prev, [cat.id]: { ...prev[cat.id], defaultIsEntertainment: e.target.checked } }))} />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input type="checkbox" checked={!!edit.vatDefaultLocked} onChange={(e) => setCategoryVatEdits((prev) => ({ ...prev, [cat.id]: { ...prev[cat.id], vatDefaultLocked: e.target.checked } }))} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <button type="button" disabled={updatingCategoryId === cat.id} className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50" onClick={async () => {
+                        setUpdatingCategoryId(cat.id)
+                        try {
+                          const res = await expensesAPI.updateCategory(cat.id, categoryVatEdits[cat.id])
+                          if (res?.success) { toast.success('Category updated'); await fetchCategories() }
+                          else toast.error(res?.message || 'Update failed')
+                        } catch (e) { toast.error(e?.response?.data?.message || 'Update failed') }
+                        finally { setUpdatingCategoryId(null) }
+                      }}>
+                        {updatingCategoryId === cat.id ? 'Saving...' : 'Update'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button type="button" onClick={() => setShowCategoryVatModal(false)} className="px-4 py-2 border-2 border-lime-300 rounded text-sm font-medium hover:bg-lime-50">Close</button>
+        </div>
+      </Modal>
+
+      <BulkVatUpdateModal
+        isOpen={showBulkVatModal}
+        onClose={() => { setShowBulkVatModal(false); setSelectedExpenseIds([]) }}
+        onSuccess={() => { setShowEditModal(false); setSelectedExpense(null); fetchExpenses(); setSelectedExpenseIds([]) }}
+        scope={selectedExpenseIds.length > 0 ? 'selected' : 'all'}
+        expenseIds={selectedExpenseIds}
+        noVatCount={noVatCount}
+        previewExpenses={filteredExpenses.filter((e) => selectedExpenseIds.includes(e.id))}
+      />
     </div>
   )
 }

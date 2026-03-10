@@ -160,6 +160,7 @@ namespace FrozenApi.Models
         [MaxLength(200)]
         public string? ExternalReference { get; set; } // For idempotency - unique external reference (e.g., POS terminal ID, mobile app transaction ID)
         public DateTime? InvoiceDate { get; set; } // Optional: Custom invoice date (defaults to today if not provided) - Admin and Staff can set
+        public decimal RoundOff { get; set; } = 0m;
     }
 
     public class UpdateSaleRequest
@@ -173,6 +174,7 @@ namespace FrozenApi.Models
         public string? EditReason { get; set; } // Required for Staff users
         public string? RowVersion { get; set; } // Base64 encoded RowVersion for concurrency control
         public DateTime? InvoiceDate { get; set; } // Optional: Custom invoice date - Admin and Staff can modify
+        public decimal RoundOff { get; set; } = 0m;
     }
 
     public class UnlockInvoiceRequest
@@ -219,6 +221,7 @@ namespace FrozenApi.Models
         public decimal Subtotal { get; set; }
         public decimal VatTotal { get; set; }
         public decimal Discount { get; set; }
+        public decimal RoundOff { get; set; }
         public decimal GrandTotal { get; set; }
         public decimal PaidAmount { get; set; } // CRITICAL: Include for balance calculation and accurate reporting
         public string PaymentStatus { get; set; } = string.Empty;
@@ -336,6 +339,12 @@ namespace FrozenApi.Models
         public decimal Amount { get; set; }
         public DateTime Date { get; set; }
         public string? Note { get; set; }
+        public decimal? VatRate { get; set; }
+        public decimal? VatAmount { get; set; }
+        public decimal? TotalAmount { get; set; }
+        public string? TaxType { get; set; }
+        public bool? IsTaxClaimable { get; set; }
+        public bool? IsEntertainment { get; set; }
     }
 
     public class ExpenseCategoryDto
@@ -343,6 +352,11 @@ namespace FrozenApi.Models
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string ColorCode { get; set; } = string.Empty;
+        public decimal DefaultVatRate { get; set; }
+        public string DefaultTaxType { get; set; } = "Standard";
+        public bool DefaultIsTaxClaimable { get; set; }
+        public bool DefaultIsEntertainment { get; set; }
+        public bool VatDefaultLocked { get; set; }
     }
 
     public class CreateExpenseRequest
@@ -354,6 +368,37 @@ namespace FrozenApi.Models
         [Required]
         public DateTime Date { get; set; }
         public string? Note { get; set; }
+        public decimal? VatRate { get; set; }
+        public string? TaxType { get; set; }
+        public bool? IsTaxClaimable { get; set; }
+        public bool? IsEntertainment { get; set; }
+    }
+
+    public class BulkVatUpdateRequest
+    {
+        public List<int>? ExpenseIds { get; set; }
+        public int? CategoryId { get; set; }
+        public bool AllNoVat { get; set; }
+        public string Interpretation { get; set; } = "add-on-top";
+        public decimal VatRate { get; set; } = 0.05m;
+        public bool IsTaxClaimable { get; set; }
+        public string TaxType { get; set; } = "Standard";
+    }
+
+    public class BulkVatUpdateResult
+    {
+        public int Updated { get; set; }
+        public int Skipped { get; set; }
+        public List<string> Errors { get; set; } = new List<string>();
+    }
+
+    public class UpdateExpenseCategoryRequest
+    {
+        public decimal? DefaultVatRate { get; set; }
+        public string? DefaultTaxType { get; set; }
+        public bool? DefaultIsTaxClaimable { get; set; }
+        public bool? DefaultIsEntertainment { get; set; }
+        public bool? VatDefaultLocked { get; set; }
     }
 
     // Report DTOs
@@ -836,6 +881,47 @@ namespace FrozenApi.Models
         public decimal TotalPurchase { get; set; }
         /// <summary>Total expenses in the period.</summary>
         public decimal TotalExpenses { get; set; }
+    }
+
+    // Payment Receipt DTOs
+    public class PaymentReceiptDto
+    {
+        public int Id { get; set; }
+        public string ReceiptNumber { get; set; } = string.Empty;
+        public DateTime GeneratedAt { get; set; }
+        public decimal TotalAmount { get; set; }
+        public string AmountInWords { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public string? CustomerTrn { get; set; }
+        public string? CustomerAddress { get; set; }
+        public string CompanyNameEn { get; set; } = string.Empty;
+        public string? CompanyNameAr { get; set; }
+        public string? CompanyAddress { get; set; }
+        public string? CompanyTrn { get; set; }
+        public string? CompanyPhone { get; set; }
+        public List<PaymentReceiptPaymentLineDto> Payments { get; set; } = new();
+        public List<PaymentReceiptInvoiceLineDto> Invoices { get; set; } = new();
+        public decimal PreviousBalance { get; set; }
+        public decimal AmountPaid { get; set; }
+        public decimal RemainingBalance { get; set; }
+        public bool IsReprint { get; set; }
+    }
+
+    public class PaymentReceiptPaymentLineDto
+    {
+        public int PaymentId { get; set; }
+        public decimal Amount { get; set; }
+        public string Method { get; set; } = string.Empty;
+        public string? Reference { get; set; }
+        public DateTime PaymentDate { get; set; }
+    }
+
+    public class PaymentReceiptInvoiceLineDto
+    {
+        public string InvoiceNo { get; set; } = string.Empty;
+        public DateTime InvoiceDate { get; set; }
+        public decimal InvoiceTotal { get; set; }
+        public decimal AmountApplied { get; set; }
     }
 }
 

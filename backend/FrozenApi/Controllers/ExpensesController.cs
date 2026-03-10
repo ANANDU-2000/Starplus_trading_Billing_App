@@ -33,11 +33,12 @@ namespace FrozenApi.Controllers
             [FromQuery] string? category = null,
             [FromQuery] DateTime? fromDate = null,
             [FromQuery] DateTime? toDate = null,
-            [FromQuery] string? groupBy = null) // weekly, monthly, yearly
+            [FromQuery] string? groupBy = null,
+            [FromQuery] bool noVatOnly = false)
         {
             try
             {
-                var result = await _expenseService.GetExpensesAsync(page, pageSize, category, fromDate, toDate, groupBy);
+                var result = await _expenseService.GetExpensesAsync(page, pageSize, category, fromDate, toDate, groupBy, noVatOnly);
                 return Ok(new ApiResponse<PagedResponse<ExpenseDto>>
                 {
                     Success = true,
@@ -238,6 +239,39 @@ namespace FrozenApi.Controllers
             }
         }
 
+        [HttpPost("bulk-vat-update")]
+        public async Task<ActionResult<ApiResponse<BulkVatUpdateResult>>> BulkVatUpdate([FromBody] BulkVatUpdateRequest request)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return Unauthorized(new ApiResponse<BulkVatUpdateResult>
+                    {
+                        Success = false,
+                        Message = "Invalid user"
+                    });
+                }
+                var result = await _expenseService.BulkVatUpdateAsync(request, userId);
+                return Ok(new ApiResponse<BulkVatUpdateResult>
+                {
+                    Success = true,
+                    Message = $"Bulk VAT update completed. Updated: {result.Updated}, Skipped: {result.Skipped}",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<BulkVatUpdateResult>
+                {
+                    Success = false,
+                    Message = "An error occurred",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpGet("categories")]
         public async Task<ActionResult<ApiResponse<List<ExpenseCategoryDto>>>> GetCategories()
         {
@@ -250,7 +284,12 @@ namespace FrozenApi.Controllers
                     {
                         Id = c.Id,
                         Name = c.Name,
-                        ColorCode = c.ColorCode
+                        ColorCode = c.ColorCode,
+                        DefaultVatRate = c.DefaultVatRate,
+                        DefaultTaxType = c.DefaultTaxType,
+                        DefaultIsTaxClaimable = c.DefaultIsTaxClaimable,
+                        DefaultIsEntertainment = c.DefaultIsEntertainment,
+                        VatDefaultLocked = c.VatDefaultLocked
                     })
                     .ToListAsync();
 
@@ -324,7 +363,12 @@ namespace FrozenApi.Controllers
                 {
                     Id = category.Id,
                     Name = category.Name,
-                    ColorCode = category.ColorCode
+                    ColorCode = category.ColorCode,
+                    DefaultVatRate = category.DefaultVatRate,
+                    DefaultTaxType = category.DefaultTaxType,
+                    DefaultIsTaxClaimable = category.DefaultIsTaxClaimable,
+                    DefaultIsEntertainment = category.DefaultIsEntertainment,
+                    VatDefaultLocked = category.VatDefaultLocked
                 };
 
                 return Ok(new ApiResponse<ExpenseCategoryDto>
@@ -343,6 +387,40 @@ namespace FrozenApi.Controllers
                     Message = "An error occurred while creating the category",
                     Errors = new List<string> { ex.Message }
                 });
+            }
+        }
+
+        [HttpPut("categories/{id}")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<ApiResponse<ExpenseCategoryDto>>> UpdateCategory(int id, [FromBody] UpdateExpenseCategoryRequest request)
+        {
+            try
+            {
+                var category = await _context.ExpenseCategories.FindAsync(id);
+                if (category == null)
+                    return NotFound(new ApiResponse<ExpenseCategoryDto> { Success = false, Message = "Category not found" });
+                if (request.DefaultVatRate.HasValue) category.DefaultVatRate = request.DefaultVatRate.Value;
+                if (request.DefaultTaxType != null) category.DefaultTaxType = request.DefaultTaxType;
+                if (request.DefaultIsTaxClaimable.HasValue) category.DefaultIsTaxClaimable = request.DefaultIsTaxClaimable.Value;
+                if (request.DefaultIsEntertainment.HasValue) category.DefaultIsEntertainment = request.DefaultIsEntertainment.Value;
+                if (request.VatDefaultLocked.HasValue) category.VatDefaultLocked = request.VatDefaultLocked.Value;
+                await _context.SaveChangesAsync();
+                var dto = new ExpenseCategoryDto
+                {
+                    Id = category.Id,
+                    Name = category.Name,
+                    ColorCode = category.ColorCode,
+                    DefaultVatRate = category.DefaultVatRate,
+                    DefaultTaxType = category.DefaultTaxType,
+                    DefaultIsTaxClaimable = category.DefaultIsTaxClaimable,
+                    DefaultIsEntertainment = category.DefaultIsEntertainment,
+                    VatDefaultLocked = category.VatDefaultLocked
+                };
+                return Ok(new ApiResponse<ExpenseCategoryDto> { Success = true, Message = "Category updated", Data = dto });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<ExpenseCategoryDto> { Success = false, Message = ex.Message, Errors = new List<string> { ex.Message } });
             }
         }
     }

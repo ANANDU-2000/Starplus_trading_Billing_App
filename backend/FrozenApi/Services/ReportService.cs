@@ -223,6 +223,7 @@ namespace FrozenApi.Services
                                                 Subtotal = s.Subtotal,
                                                 VatTotal = s.VatTotal,
                                                 Discount = s.Discount,
+                                                RoundOff = s.RoundOff,
                                                 GrandTotal = s.GrandTotal,
                                                 PaidAmount = s.PaidAmount, // CRITICAL: Include for balance calculation
                                                 PaymentStatus = s.PaymentStatus.ToString(),
@@ -385,6 +386,7 @@ namespace FrozenApi.Services
                                   Subtotal = s.Subtotal,
                                   VatTotal = s.VatTotal,
                                   Discount = s.Discount,
+                                  RoundOff = s.RoundOff,
                                   GrandTotal = s.GrandTotal,
                                   PaidAmount = s.PaidAmount, // CRITICAL: Include for balance calculation
                                   PaymentStatus = s.PaymentStatus.ToString(),

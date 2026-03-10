@@ -336,6 +336,8 @@
                     <td class="center bold totals" style="vertical-align: middle; padding:1px;">{{vat_amount}}</td>
                     <td class="center" style="vertical-align: middle; padding:1px;"></td>
                 </tr>
+                <!-- Row 2.5: Round Off (only when non-zero) -->
+                {{round_off_row}}
                 <!-- Row 3: Total Amount with amount in words IN dots -->
                 <tr class="totals-row" style="background-color:transparent; height:18px;">
                     <td colspan="6" class="left bold" style="vertical-align: middle; padding:1px; font-size:10pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">

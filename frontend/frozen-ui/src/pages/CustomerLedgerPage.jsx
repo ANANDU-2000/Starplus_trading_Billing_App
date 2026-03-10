@@ -35,6 +35,7 @@ import { Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import PaymentModal from '../components/PaymentModal'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
+import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
@@ -76,6 +77,8 @@ const CustomerLedgerPage = () => {
     status: 'all',
     type: 'all'
   })
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState([])
   
   // Keyboard shortcuts refs
   const searchInputRef = useRef(null)
@@ -1772,93 +1775,19 @@ const CustomerLedgerPage = () => {
                     <PaymentsTab 
                       payments={customerPayments}
                       user={user}
-                      onViewReceipt={async (paymentId) => {
-                        // Handle view receipt - generate payment receipt PDF
-                        try {
-                          toast.loading('Generating receipt...', { id: 'receipt' })
-                          
-                          // Find payment details
-                          const payment = customerPayments.find(p => p.id === paymentId)
-                          if (!payment) {
-                            toast.error('Payment not found', { id: 'receipt' })
-                            return
-                          }
-
-                          // For now, use a simple print window with payment details
-                          const printContent = `
-                            <!DOCTYPE html>
-                            <html>
-                            <head>
-                              <title>Payment Receipt</title>
-                              <style>
-                                body { font-family: Arial, sans-serif; padding: 20px; }
-                                .header { text-align: center; margin-bottom: 30px; }
-                                .header h1 { margin: 0; color: #1f2937; }
-                                .header p { margin: 5px 0; color: #6b7280; }
-                                .receipt-details { margin: 20px 0; }
-                                .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
-                                .detail-row .label { font-weight: bold; color: #374151; }
-                                .detail-row .value { color: #1f2937; }
-                                .amount { font-size: 24px; font-weight: bold; color: #059669; text-align: center; margin: 30px 0; }
-                                .footer { text-align: center; margin-top: 50px; color: #6b7280; font-size: 12px; }
-                                @media print {
-                                  body { padding: 0; }
-                                }
-                              </style>
-                            </head>
-                            <body>
-                              <div class="header">
-                                <h1>PAYMENT RECEIPT</h1>
-                                <p>Receipt #${payment.id}</p>
-                                <p>${new Date(payment.paymentDate).toLocaleString('en-GB')}</p>
-                              </div>
-                              <div class="receipt-details">
-                                <div class="detail-row">
-                                  <span class="label">Customer:</span>
-                                  <span class="value">${selectedCustomer?.name || 'N/A'}</span>
-                                </div>
-                                <div class="detail-row">
-                                  <span class="label">Payment Mode:</span>
-                                  <span class="value">${payment.method || payment.mode || 'N/A'}</span>
-                                </div>
-                                <div class="detail-row">
-                                  <span class="label">Reference:</span>
-                                  <span class="value">${payment.ref || payment.reference || '-'}</span>
-                                </div>
-                                ${payment.invoiceNo ? `
-                                <div class="detail-row">
-                                  <span class="label">Invoice:</span>
-                                  <span class="value">${payment.invoiceNo}</span>
-                                </div>
-                                ` : ''}
-                              </div>
-                              <div class="amount">
-                                AMOUNT: ${formatCurrency(payment.amount)}
-                              </div>
-                              <div class="footer">
-                                <p>Thank you for your payment</p>
-                                <p>This is a computer-generated receipt</p>
-                              </div>
-                            </body>
-                            </html>
-                          `
-
-                          const printWindow = window.open('', '_blank')
-                          if (printWindow) {
-                            printWindow.document.write(printContent)
-                            printWindow.document.close()
-                            printWindow.onload = () => {
-                              printWindow.print()
-                            }
-                            toast.success('Receipt ready to print', { id: 'receipt' })
-                          } else {
-                            toast.error('Failed to open print window. Please check popup blocker.', { id: 'receipt' })
-                          }
-                        } catch (error) {
-                          console.error('Error generating receipt:', error)
-                          toast.error('Failed to generate receipt', { id: 'receipt' })
-                        }
+                      selectedPaymentIds={selectedPaymentIds}
+                      onTogglePayment={(id) => {
+                        setSelectedPaymentIds(prev =>
+                          prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                        )
                       }}
+                      onClearSelection={() => setSelectedPaymentIds([])}
+                      onViewReceipt={(paymentId) => {
+                        setSelectedPaymentIds([paymentId])
+                        setShowReceiptModal(true)
+                      }}
+                      onGenerateReceipt={() => setShowReceiptModal(true)}
+                      onSelectAll={(checked) => setSelectedPaymentIds(checked ? customerPayments.map(p => p.id) : [])}
                       onEditPayment={async (payment) => {
                         // Handle edit payment
                         try {
@@ -2008,6 +1937,14 @@ const CustomerLedgerPage = () => {
           }}
         />
       )}
+
+      <ReceiptPreviewModal
+        paymentIds={showReceiptModal ? selectedPaymentIds : []}
+        isOpen={showReceiptModal}
+        onClose={() => {
+          setShowReceiptModal(false)
+        }}
+      />
 
       {/* Add Customer Modal */}
       <Modal
@@ -2671,9 +2608,12 @@ const InvoicesTab = ({ invoices, outstandingInvoices, user, onViewInvoice, onVie
 }
 
 // Payments Tab Component
-const PaymentsTab = ({ payments, user, onViewReceipt, onEditPayment, onDeletePayment }) => {
+const PaymentsTab = ({ payments, user, selectedPaymentIds = [], onTogglePayment, onSelectAll, onClearSelection, onViewReceipt, onGenerateReceipt, onEditPayment, onDeletePayment }) => {
   const isAdmin = user?.role?.toLowerCase() === 'admin'
-  
+  const selectedTotal = payments
+    .filter(p => selectedPaymentIds.includes(p.id))
+    .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+
   return (
     <div>
       <div className="mb-4 flex justify-end">
@@ -2682,12 +2622,48 @@ const PaymentsTab = ({ payments, user, onViewReceipt, onEditPayment, onDeletePay
           <span>Filter by Mode</span>
         </button>
       </div>
+
+      {selectedPaymentIds.length > 0 && (
+        <div className="mb-4 flex items-center justify-between gap-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <span className="text-sm font-medium">
+            {selectedPaymentIds.length} payment(s) selected — Total: {formatCurrency(selectedTotal)}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onGenerateReceipt}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
+            >
+              Generate Receipt
+            </button>
+            <button
+              type="button"
+              onClick={onClearSelection}
+              className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-2 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={payments.length > 0 && selectedPaymentIds.length === payments.length}
+                    onChange={(e) => {
+                      if (e.target.checked && typeof onSelectAll === 'function') onSelectAll(true)
+                      else if (typeof onClearSelection === 'function') onClearSelection()
+                    }}
+                    className="rounded border-gray-300"
+                    title="Select all"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Mode</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Amount</th>
@@ -2699,13 +2675,21 @@ const PaymentsTab = ({ payments, user, onViewReceipt, onEditPayment, onDeletePay
             <tbody className="bg-white divide-y divide-gray-200">
               {payments.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
                     No payments found
                   </td>
                 </tr>
               ) : (
                 payments.map((payment) => (
                   <tr key={payment.id} className="hover:bg-gray-50">
+                    <td className="px-2 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedPaymentIds.includes(payment.id)}
+                        onChange={() => onTogglePayment && onTogglePayment(payment.id)}
+                        className="rounded border-gray-300"
+                      />
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                       {new Date(payment.paymentDate).toLocaleDateString('en-GB')}
                     </td>
@@ -2726,7 +2710,7 @@ const PaymentsTab = ({ payments, user, onViewReceipt, onEditPayment, onDeletePay
                         <button
                           onClick={() => onViewReceipt(payment.id)}
                           className="text-blue-600 hover:text-blue-900 p-1 rounded transition-colors"
-                          title="Print Receipt"
+                          title="Generate Receipt"
                         >
                           <Printer className="h-4 w-4" />
                         </button>

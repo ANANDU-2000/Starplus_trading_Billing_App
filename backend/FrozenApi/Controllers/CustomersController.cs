@@ -16,10 +16,12 @@ namespace FrozenApi.Controllers
     public class CustomersController : ControllerBase
     {
         private readonly ICustomerService _customerService;
+        private readonly IPaymentReceiptService _receiptService;
 
-        public CustomersController(ICustomerService customerService)
+        public CustomersController(ICustomerService customerService, IPaymentReceiptService receiptService)
         {
             _customerService = customerService;
+            _receiptService = receiptService;
         }
 
         [HttpGet]
@@ -259,6 +261,20 @@ namespace FrozenApi.Controllers
                     Message = "An error occurred",
                     Errors = new List<string> { ex.Message }
                 });
+            }
+        }
+
+        [HttpGet("{id}/receipts")]
+        public async Task<ActionResult<ApiResponse<List<PaymentReceiptDto>>>> GetCustomerReceipts(int id)
+        {
+            try
+            {
+                var list = await _receiptService.GetReceiptsByCustomerAsync(id);
+                return Ok(new ApiResponse<List<PaymentReceiptDto>> { Success = true, Data = list });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<List<PaymentReceiptDto>> { Success = false, Message = ex.Message });
             }
         }
 

@@ -337,6 +337,20 @@ namespace FrozenApi.Services
                                     table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text(sale.VatTotal.ToString("0.00")).FontSize(10);
                                     table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
                                     
+                                    // Row 2.5: Round Off (only when non-zero)
+                                    if (sale.RoundOff != 0)
+                                    {
+                                        var roundOffFormatted = sale.RoundOff > 0 ? "+" + sale.RoundOff.ToString("0.00") : sale.RoundOff.ToString("0.00");
+                                        table.Cell().ColumnSpan(5).Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).Row(row => {
+                                            row.AutoItem().Text("Round Off").FontSize(10);
+                                            row.RelativeItem();
+                                            row.AutoItem().Text("تقريب").FontSize(10).FontFamily(_arabicFont).DirectionFromRightToLeft();
+                                        });
+                                        table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
+                                        table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text("").FontSize(10);
+                                        table.Cell().Border(0.5f).PaddingVertical(2).PaddingHorizontal(2).AlignCenter().Text(roundOffFormatted).FontSize(10);
+                                    }
+                                    
                                     // Row 3: Total Amount
                                     var amountInWords = ConvertToWords(sale.GrandTotal);
                                     // Shorten amount in words if too long
@@ -838,6 +852,15 @@ namespace FrozenApi.Services
                     .Replace("{{vat_total}}", sale.VatTotal.ToString("N2"))
                     .Replace("{{GRAND_TOTAL}}", sale.GrandTotal.ToString("N2"))
                     .Replace("{{grand_total}}", sale.GrandTotal.ToString("N2"));
+
+                // Round-off row (only when non-zero)
+                var roundOffRowHtml = "";
+                if (sale.RoundOff != 0)
+                {
+                    var roFormatted = sale.RoundOff > 0 ? "+" + sale.RoundOff.ToString("N2") : sale.RoundOff.ToString("N2");
+                    roundOffRowHtml = $@"<tr class=""totals-row""><td colspan=""5"">Round Off / تقريب</td><td></td><td></td><td class=""text-right"">{roFormatted}</td></tr>";
+                }
+                processedHtml = processedHtml.Replace("{{round_off_row}}", roundOffRowHtml);
 
                 // Generate items rows HTML
                 var itemsRowsHtml = "";

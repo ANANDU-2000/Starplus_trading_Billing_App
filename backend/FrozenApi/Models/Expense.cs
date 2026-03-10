@@ -17,6 +17,14 @@ namespace FrozenApi.Models
         public string? Note { get; set; }
         public int CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        public decimal? VatRate { get; set; }
+        public decimal? VatAmount { get; set; }
+        public decimal? TotalAmount { get; set; }
+        [MaxLength(20)]
+        public string? TaxType { get; set; }
+        public bool? IsTaxClaimable { get; set; }
+        public bool? IsEntertainment { get; set; }
         
         // Navigation properties
         public virtual ExpenseCategory Category { get; set; } = null!;

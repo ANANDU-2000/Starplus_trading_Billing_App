@@ -17,10 +17,12 @@ namespace FrozenApi.Controllers
     public class PaymentsController : ControllerBase
     {
         private readonly IPaymentService _paymentService;
+        private readonly IPaymentReceiptService _receiptService;
 
-        public PaymentsController(IPaymentService paymentService)
+        public PaymentsController(IPaymentService paymentService, IPaymentReceiptService receiptService)
         {
             _paymentService = paymentService;
+            _receiptService = receiptService;
         }
 
         [HttpGet]
@@ -408,6 +410,75 @@ namespace FrozenApi.Controllers
                 });
             }
         }
+
+        [HttpPost("receipt/batch")]
+        public async Task<ActionResult<ApiResponse<PaymentReceiptDto>>> GenerateReceiptBatch([FromBody] PaymentReceiptBatchRequest request)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+                    ?? User.FindFirst("UserId")
+                    ?? User.FindFirst("sub");
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                    return Unauthorized(new ApiResponse<PaymentReceiptDto> { Success = false, Message = "Invalid user" });
+                if (request?.PaymentIds == null || request.PaymentIds.Count == 0)
+                    return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = "At least one payment ID is required." });
+                var dto = await _receiptService.GenerateReceiptAsync(userId, request.PaymentIds.ToArray());
+                return Ok(new ApiResponse<PaymentReceiptDto> { Success = true, Data = dto, Message = "Receipt generated." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message, Errors = new List<string> { ex.Message } });
+            }
+        }
+
+        [HttpPost("{id}/receipt")]
+        public async Task<ActionResult<ApiResponse<PaymentReceiptDto>>> GenerateReceipt(int id)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+                    ?? User.FindFirst("UserId")
+                    ?? User.FindFirst("sub");
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                    return Unauthorized(new ApiResponse<PaymentReceiptDto> { Success = false, Message = "Invalid user" });
+                var dto = await _receiptService.GenerateReceiptAsync(userId, new[] { id });
+                return Ok(new ApiResponse<PaymentReceiptDto> { Success = true, Data = dto, Message = "Receipt generated." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<PaymentReceiptDto> { Success = false, Message = ex.Message, Errors = new List<string> { ex.Message } });
+            }
+        }
+
+        [HttpGet("receipt/{receiptId}/pdf")]
+        public async Task<IActionResult> GetReceiptPdf(int receiptId)
+        {
+            try
+            {
+                var bytes = await _receiptService.GetReceiptPdfAsync(receiptId);
+                if (bytes == null || bytes.Length == 0)
+                    return NotFound();
+                return File(bytes, "text/html", $"Receipt-{receiptId}.html");
+            }
+            catch (Exception)
+            {
+                return StatusCode(500);
+            }
+        }
+    }
+
+    public class PaymentReceiptBatchRequest
+    {
+        public List<int> PaymentIds { get; set; } = new();
     }
 
     public class PaymentStatusRequest

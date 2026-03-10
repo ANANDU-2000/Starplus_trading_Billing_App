@@ -347,6 +347,11 @@ export const customersAPI = {
     })
     return response.data
   },
+
+  getCustomerReceipts: async (id) => {
+    const response = await api.get(`/customers/${id}/receipts`)
+    return response.data
+  },
 }
 
 export const paymentsAPI = {
@@ -412,6 +417,21 @@ export const paymentsAPI = {
     const response = await api.delete(`/payments/${id}`)
     return response.data
   },
+
+  generateReceiptBatch: async (paymentIds) => {
+    const response = await api.post('/payments/receipt/batch', { paymentIds })
+    return response.data
+  },
+
+  generateReceipt: async (paymentId) => {
+    const response = await api.post(`/payments/${paymentId}/receipt`)
+    return response.data
+  },
+
+  getReceiptPdf: async (receiptId) => {
+    const response = await api.get(`/payments/receipt/${receiptId}/pdf`, { responseType: 'blob' })
+    return response.data
+  },
 }
 
 export const expensesAPI = {
@@ -452,6 +472,16 @@ export const expensesAPI = {
 
   createCategory: async (categoryData) => {
     const response = await api.post('/expenses/categories', categoryData)
+    return response.data
+  },
+
+  updateCategory: async (id, data) => {
+    const response = await api.put(`/expenses/categories/${id}`, data)
+    return response.data
+  },
+
+  bulkVatUpdate: async (body) => {
+    const response = await api.post('/expenses/bulk-vat-update', body)
     return response.data
   },
 }

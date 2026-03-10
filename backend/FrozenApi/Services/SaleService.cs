@@ -105,6 +105,7 @@ namespace FrozenApi.Services
                     Subtotal = s.Subtotal,
                     VatTotal = s.VatTotal,
                     Discount = s.Discount,
+                    RoundOff = s.RoundOff,
                     GrandTotal = s.GrandTotal,
                     PaymentStatus = s.PaymentStatus.ToString(),
                     Notes = s.Notes,
@@ -174,6 +175,7 @@ namespace FrozenApi.Services
                 Subtotal = sale.Subtotal,
                 VatTotal = sale.VatTotal,
                 Discount = sale.Discount,
+                RoundOff = sale.RoundOff,
                 GrandTotal = sale.GrandTotal,
                 PaymentStatus = sale.PaymentStatus.ToString(),
                 Notes = sale.Notes,
@@ -436,8 +438,12 @@ namespace FrozenApi.Services
                     inventoryTransactions.Add(inventoryTransaction);
                 }
 
-                // Apply global discount (subtract from subtotal + VAT)
-                var grandTotal = Math.Round((subtotal + vatTotal - request.Discount), 2);
+                // Apply global discount, then round-off (round-off does NOT affect VAT)
+                var calcTotal = subtotal + vatTotal - request.Discount;
+                var roundOff = request.RoundOff;
+                if (Math.Abs(roundOff) > 1.00m)
+                    throw new InvalidOperationException("Round-off cannot exceed ±AED 1.00");
+                var finalTotal = Math.Round(calcTotal + roundOff, 2);
 
                 // Create sale
                 // CRITICAL: Stock is decremented in this transaction (lines 276-290)
@@ -451,7 +457,7 @@ namespace FrozenApi.Services
                 if (isCashCustomer)
                 {
                     // Cash customer = instant payment, mark as paid immediately
-                    initialPaidAmount = grandTotal;
+                    initialPaidAmount = finalTotal;
                     initialPaymentStatus = SalePaymentStatus.Paid;
                 }
                 
@@ -464,8 +470,9 @@ namespace FrozenApi.Services
                     Subtotal = subtotal,
                     VatTotal = vatTotal,
                     Discount = request.Discount,
-                    GrandTotal = grandTotal,
-                    TotalAmount = grandTotal, // Set TotalAmount = GrandTotal
+                    RoundOff = roundOff,
+                    GrandTotal = finalTotal,
+                    TotalAmount = finalTotal, // Set TotalAmount = GrandTotal
                     PaidAmount = initialPaidAmount, // Cash customer = paid immediately
                     PaymentStatus = initialPaymentStatus, // Cash customer = Paid status
                     IsFinalized = true, // Invoice is finalized immediately - stock decremented in transaction
@@ -555,7 +562,7 @@ namespace FrozenApi.Services
                     }
 
                     // Update payment status based on total paid
-                    if (totalPaid >= grandTotal)
+                    if (totalPaid >= finalTotal)
                     {
                         sale.PaymentStatus = SalePaymentStatus.Paid;
                     }
@@ -599,7 +606,7 @@ namespace FrozenApi.Services
                         var customer = await _context.Customers.FindAsync(request.CustomerId.Value);
                         if (customer != null)
                         {
-                            customer.Balance += grandTotal;
+                            customer.Balance += finalTotal;
                             customer.LastActivity = DateTime.UtcNow;
                             customer.UpdatedAt = DateTime.UtcNow;
                         }
@@ -611,7 +618,7 @@ namespace FrozenApi.Services
                 {
                     UserId = userId,
                     Action = "Sale Created",
-                    Details = $"Invoice: {invoiceNo}, Total: {grandTotal:C}",
+                    Details = $"Invoice: {invoiceNo}, Total: {finalTotal:C}",
                     CreatedAt = DateTime.UtcNow
                 };
 
@@ -627,7 +634,7 @@ namespace FrozenApi.Services
                     {
                         await _balanceService.UpdateCustomerBalanceOnInvoiceCreatedAsync(
                             request.CustomerId.Value,
-                            grandTotal);
+                            finalTotal);
                         
                         // Also update for any cleared payments
                         if (request.Payments != null && request.Payments.Any())
@@ -767,8 +774,12 @@ namespace FrozenApi.Services
                     inventoryTransactions.Add(inventoryTransaction);
                 }
 
-                // Apply global discount (subtract from subtotal + VAT)
-                var grandTotal = Math.Round((subtotal + vatTotal - request.Discount), 2);
+                // Apply global discount, then round-off
+                var calcTotal = subtotal + vatTotal - request.Discount;
+                var roundOff = request.RoundOff;
+                if (Math.Abs(roundOff) > 1.00m)
+                    throw new InvalidOperationException("Round-off cannot exceed ±AED 1.00");
+                var finalTotal = Math.Round(calcTotal + roundOff, 2);
 
                 // CASH CUSTOMER LOGIC: If no customer ID (cash customer), auto-mark as paid with cash payment
                 bool isCashCustomerOverride = !request.CustomerId.HasValue;
@@ -778,7 +789,7 @@ namespace FrozenApi.Services
                 if (isCashCustomerOverride)
                 {
                     // Cash customer = instant payment, mark as paid immediately
-                    initialPaidAmountOverride = grandTotal;
+                    initialPaidAmountOverride = finalTotal;
                     initialPaymentStatusOverride = SalePaymentStatus.Paid;
                 }
 
@@ -790,8 +801,9 @@ namespace FrozenApi.Services
                     Subtotal = subtotal,
                     VatTotal = vatTotal,
                     Discount = request.Discount,
-                    GrandTotal = grandTotal,
-                    TotalAmount = grandTotal, // Set TotalAmount = GrandTotal
+                    RoundOff = roundOff,
+                    GrandTotal = finalTotal,
+                    TotalAmount = finalTotal, // Set TotalAmount = GrandTotal
                     PaidAmount = initialPaidAmountOverride, // Cash customer = paid immediately
                     PaymentStatus = initialPaymentStatusOverride, // Cash customer = Paid status
                     IsFinalized = true, // Invoice is finalized - stock decremented
@@ -828,7 +840,7 @@ namespace FrozenApi.Services
                     {
                         SaleId = sale.Id,
                         CustomerId = null, // Cash customer has no customer ID
-                        Amount = grandTotal,
+                        Amount = finalTotal,
                         Mode = PaymentMode.CASH,
                         Reference = "CASH",
                         Status = PaymentStatus.CLEARED, // Cash is always cleared
@@ -837,7 +849,7 @@ namespace FrozenApi.Services
                         CreatedAt = DateTime.UtcNow
                     };
                     _context.Payments.Add(cashPayment);
-                    totalPaid = grandTotal;
+                    totalPaid = finalTotal;
                 }
                 else if (request.Payments != null && request.Payments.Any())
                 {
@@ -866,7 +878,7 @@ namespace FrozenApi.Services
                     _context.Payments.AddRange(payments);
 
                     totalPaid = payments.Sum(p => p.Amount);
-                    if (totalPaid >= grandTotal)
+                    if (totalPaid >= finalTotal)
                     {
                         sale.PaymentStatus = SalePaymentStatus.Paid;
                     }
@@ -888,7 +900,7 @@ namespace FrozenApi.Services
                 {
                     UserId = userId,
                     Action = "Sale Created (Admin Override)",
-                    Details = $"Invoice: {invoiceNo}, Total: {grandTotal:C}, Reason: {reason}",
+                    Details = $"Invoice: {invoiceNo}, Total: {finalTotal:C}, Reason: {reason}",
                     CreatedAt = DateTime.UtcNow
                 };
 
@@ -1217,7 +1229,11 @@ namespace FrozenApi.Services
                     });
                 }
 
-                var grandTotal = Math.Round((subtotal + vatTotal - request.Discount), 2);
+                var calcTotal = subtotal + vatTotal - request.Discount;
+                var roundOff = request.RoundOff;
+                if (Math.Abs(roundOff) > 1.00m)
+                    throw new InvalidOperationException("Round-off cannot exceed ±AED 1.00");
+                var grandTotal = Math.Round(calcTotal + roundOff, 2);
 
                 // Delete old sale items
                 if (saleForUpdate.Items != null && saleForUpdate.Items.Any())
@@ -1230,6 +1246,7 @@ namespace FrozenApi.Services
                 saleForUpdate.Subtotal = subtotal;
                 saleForUpdate.VatTotal = vatTotal;
                 saleForUpdate.Discount = request.Discount;
+                saleForUpdate.RoundOff = roundOff;
                 saleForUpdate.GrandTotal = grandTotal;
                 saleForUpdate.TotalAmount = grandTotal; // Update TotalAmount
                 
@@ -1747,6 +1764,7 @@ namespace FrozenApi.Services
                     CustomerName = sale.Customer?.Name ?? "Cash Customer",
                     Subtotal = sale.Subtotal,
                     VatTotal = sale.VatTotal,
+                    RoundOff = sale.RoundOff,
                     GrandTotal = sale.GrandTotal,
                     PaymentStatus = sale.PaymentStatus.ToString(),
                     PaidAmount = sale.PaidAmount,
@@ -2024,6 +2042,7 @@ namespace FrozenApi.Services
                 Subtotal = s.Subtotal,
                 VatTotal = s.VatTotal,
                 Discount = s.Discount,
+                RoundOff = s.RoundOff,
                 GrandTotal = s.GrandTotal,
                 PaymentStatus = s.PaymentStatus.ToString(),
                 Notes = s.Notes,

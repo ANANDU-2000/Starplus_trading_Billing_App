@@ -22,6 +22,7 @@ namespace FrozenApi.Models
         public decimal Subtotal { get; set; }
         public decimal VatTotal { get; set; }
         public decimal Discount { get; set; }
+        public decimal RoundOff { get; set; } = 0;
         public decimal GrandTotal { get; set; }
         public decimal TotalAmount { get; set; } // Alias for GrandTotal, kept for consistency
         public decimal PaidAmount { get; set; } = 0; // Total amount paid so far

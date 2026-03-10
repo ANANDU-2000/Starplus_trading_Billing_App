@@ -11,13 +11,14 @@ namespace FrozenApi.Services
 {
     public interface IExpenseService
     {
-        Task<PagedResponse<ExpenseDto>> GetExpensesAsync(int page = 1, int pageSize = 10, string? category = null, DateTime? fromDate = null, DateTime? toDate = null, string? groupBy = null);
-        Task<List<ExpenseAggregateDto>> GetExpensesAggregatedAsync(DateTime fromDate, DateTime toDate, string groupBy = "monthly"); // weekly, monthly, yearly
+        Task<PagedResponse<ExpenseDto>> GetExpensesAsync(int page = 1, int pageSize = 10, string? category = null, DateTime? fromDate = null, DateTime? toDate = null, string? groupBy = null, bool noVatOnly = false);
+        Task<List<ExpenseAggregateDto>> GetExpensesAggregatedAsync(DateTime fromDate, DateTime toDate, string groupBy = "monthly");
         Task<ExpenseDto?> GetExpenseByIdAsync(int id);
         Task<ExpenseDto> CreateExpenseAsync(CreateExpenseRequest request, int userId);
         Task<ExpenseDto?> UpdateExpenseAsync(int id, CreateExpenseRequest request, int userId);
         Task<bool> DeleteExpenseAsync(int id, int userId);
         Task<List<string>> GetExpenseCategoriesAsync();
+        Task<BulkVatUpdateResult> BulkVatUpdateAsync(BulkVatUpdateRequest request, int userId);
     }
 
     public class ExpenseService : IExpenseService
@@ -29,30 +30,22 @@ namespace FrozenApi.Services
             _context = context;
         }
 
-        public async Task<PagedResponse<ExpenseDto>> GetExpensesAsync(int page = 1, int pageSize = 10, string? category = null, DateTime? fromDate = null, DateTime? toDate = null, string? groupBy = null)
+        public async Task<PagedResponse<ExpenseDto>> GetExpensesAsync(int page = 1, int pageSize = 10, string? category = null, DateTime? fromDate = null, DateTime? toDate = null, string? groupBy = null, bool noVatOnly = false)
         {
-            // OPTIMIZATION: Use AsNoTracking and limit page size
-            pageSize = Math.Min(pageSize, 100); // Max 100 items per page
-            
+            pageSize = Math.Min(pageSize, 100);
             var query = _context.Expenses
-                .AsNoTracking() // Performance: No change tracking needed
+                .AsNoTracking()
                 .Include(e => e.Category)
                 .AsQueryable();
 
             if (!string.IsNullOrEmpty(category))
-            {
                 query = query.Where(e => e.Category.Name == category);
-            }
-
             if (fromDate.HasValue)
-            {
                 query = query.Where(e => e.Date >= fromDate.Value);
-            }
-
             if (toDate.HasValue)
-            {
                 query = query.Where(e => e.Date <= toDate.Value);
-            }
+            if (noVatOnly)
+                query = query.Where(e => e.VatRate == null);
 
             var totalCount = await query.CountAsync();
             var expenses = await query
@@ -67,7 +60,13 @@ namespace FrozenApi.Services
                     CategoryColor = e.Category.ColorCode,
                     Amount = e.Amount,
                     Date = e.Date,
-                    Note = e.Note
+                    Note = e.Note,
+                    VatRate = e.VatRate,
+                    VatAmount = e.VatAmount,
+                    TotalAmount = e.TotalAmount,
+                    TaxType = e.TaxType,
+                    IsTaxClaimable = e.IsTaxClaimable,
+                    IsEntertainment = e.IsEntertainment
                 })
                 .ToListAsync();
 
@@ -131,12 +130,12 @@ namespace FrozenApi.Services
                                 Period = $"Week {g.Key.Week}, {g.Key.Year}",
                                 PeriodStart = expensesInGroup.Min(e => e.Date),
                                 PeriodEnd = expensesInGroup.Max(e => e.Date),
-                                TotalAmount = expensesInGroup.Sum(e => e.Amount),
+                                TotalAmount = expensesInGroup.Sum(e => e.TotalAmount ?? e.Amount),
                                 Count = expensesInGroup.Count,
                                 ByCategory = categoryGroups.Select(cg => new ExpenseCategoryTotalDto
                                 {
                                     CategoryName = cg.Key,
-                                    TotalAmount = cg.Sum(e => e.Amount),
+                                    TotalAmount = cg.Sum(e => e.TotalAmount ?? e.Amount),
                                     Count = cg.Count()
                                 }).ToList()
                             };
@@ -161,12 +160,12 @@ namespace FrozenApi.Services
                                 Period = g.Key.ToString(),
                                 PeriodStart = new DateTime(g.Key, 1, 1),
                                 PeriodEnd = new DateTime(g.Key, 12, 31),
-                                TotalAmount = expensesInGroup.Sum(e => e.Amount),
+                                TotalAmount = expensesInGroup.Sum(e => e.TotalAmount ?? e.Amount),
                                 Count = expensesInGroup.Count,
                                 ByCategory = categoryGroups.Select(cg => new ExpenseCategoryTotalDto
                                 {
                                     CategoryName = cg.Key,
-                                    TotalAmount = cg.Sum(e => e.Amount),
+                                    TotalAmount = cg.Sum(e => e.TotalAmount ?? e.Amount),
                                     Count = cg.Count()
                                 }).ToList()
                             };
@@ -191,12 +190,12 @@ namespace FrozenApi.Services
                                 Period = $"{new DateTime(g.Key.Year, g.Key.Month, 1):MMMM yyyy}",
                                 PeriodStart = new DateTime(g.Key.Year, g.Key.Month, 1),
                                 PeriodEnd = new DateTime(g.Key.Year, g.Key.Month, DateTime.DaysInMonth(g.Key.Year, g.Key.Month)),
-                                TotalAmount = expensesInGroup.Sum(e => e.Amount),
+                                TotalAmount = expensesInGroup.Sum(e => e.TotalAmount ?? e.Amount),
                                 Count = expensesInGroup.Count,
                                 ByCategory = categoryGroups.Select(cg => new ExpenseCategoryTotalDto
                                 {
                                     CategoryName = cg.Key,
-                                    TotalAmount = cg.Sum(e => e.Amount),
+                                    TotalAmount = cg.Sum(e => e.TotalAmount ?? e.Amount),
                                     Count = cg.Count()
                                 }).ToList()
                             };
@@ -222,40 +221,98 @@ namespace FrozenApi.Services
                 .FirstOrDefaultAsync(e => e.Id == id);
             if (expense == null) return null;
 
+            return MapToDto(expense);
+        }
+
+        private static ExpenseDto MapToDto(Expense e)
+        {
             return new ExpenseDto
             {
-                Id = expense.Id,
-                CategoryId = expense.CategoryId,
-                CategoryName = expense.Category.Name,
-                CategoryColor = expense.Category.ColorCode,
-                Amount = expense.Amount,
-                Date = expense.Date,
-                Note = expense.Note
+                Id = e.Id,
+                CategoryId = e.CategoryId,
+                CategoryName = e.Category?.Name ?? "",
+                CategoryColor = e.Category?.ColorCode ?? "",
+                Amount = e.Amount,
+                Date = e.Date,
+                Note = e.Note,
+                VatRate = e.VatRate,
+                VatAmount = e.VatAmount,
+                TotalAmount = e.TotalAmount,
+                TaxType = e.TaxType,
+                IsTaxClaimable = e.IsTaxClaimable,
+                IsEntertainment = e.IsEntertainment
             };
+        }
+
+        /// <summary>
+        /// Applies category VAT defaults when expense has no VAT data, or when category has VatDefaultLocked.
+        /// Amount is always the net amount; VatAmount and TotalAmount are set from VatRate.
+        /// </summary>
+        private static void ApplyCategoryVatDefaults(Expense expense, ExpenseCategory category, CreateExpenseRequest request)
+        {
+            decimal vatRate;
+            string taxType;
+            bool isTaxClaimable;
+            bool isEntertainment;
+
+            if (category.VatDefaultLocked)
+            {
+                vatRate = category.DefaultVatRate;
+                taxType = category.DefaultTaxType;
+                isTaxClaimable = category.DefaultIsTaxClaimable;
+                isEntertainment = category.DefaultIsEntertainment;
+            }
+            else if (request.VatRate.HasValue)
+            {
+                vatRate = request.VatRate.Value;
+                taxType = request.TaxType ?? category.DefaultTaxType;
+                isTaxClaimable = request.IsTaxClaimable ?? category.DefaultIsTaxClaimable;
+                isEntertainment = request.IsEntertainment ?? category.DefaultIsEntertainment;
+            }
+            else
+            {
+                vatRate = category.DefaultVatRate;
+                taxType = category.DefaultTaxType;
+                isTaxClaimable = category.DefaultIsTaxClaimable;
+                isEntertainment = category.DefaultIsEntertainment;
+            }
+
+            expense.VatRate = vatRate;
+            expense.TaxType = taxType;
+            expense.IsTaxClaimable = isTaxClaimable;
+            expense.IsEntertainment = isEntertainment;
+            if (vatRate > 0)
+            {
+                expense.VatAmount = Math.Round(expense.Amount * vatRate, 2);
+                expense.TotalAmount = expense.Amount + expense.VatAmount;
+            }
+            else
+            {
+                expense.VatAmount = 0;
+                expense.TotalAmount = expense.Amount;
+            }
         }
 
         public async Task<ExpenseDto> CreateExpenseAsync(CreateExpenseRequest request, int userId)
         {
             var category = await _context.ExpenseCategories.FindAsync(request.CategoryId);
             if (category == null)
-            {
                 throw new InvalidOperationException($"Category with ID {request.CategoryId} not found");
-            }
 
             var expense = new Expense
             {
                 CategoryId = request.CategoryId,
                 Amount = request.Amount,
-                Date = DateTime.SpecifyKind(request.Date, DateTimeKind.Utc), // Ensure UTC for PostgreSQL
+                Date = DateTime.SpecifyKind(request.Date, DateTimeKind.Utc),
                 Note = request.Note,
                 CreatedBy = userId,
                 CreatedAt = DateTime.UtcNow
             };
+            ApplyCategoryVatDefaults(expense, category, request);
 
             _context.Expenses.Add(expense);
             await _context.SaveChangesAsync();
 
-            // Create audit log
             var auditLog = new AuditLog
             {
                 UserId = userId,
@@ -263,22 +320,11 @@ namespace FrozenApi.Services
                 Details = $"Category: {category.Name}, Amount: {request.Amount:C}",
                 CreatedAt = DateTime.UtcNow
             };
-
             _context.AuditLogs.Add(auditLog);
             await _context.SaveChangesAsync();
 
             await _context.Entry(expense).Reference(e => e.Category).LoadAsync();
-
-            return new ExpenseDto
-            {
-                Id = expense.Id,
-                CategoryId = expense.CategoryId,
-                CategoryName = expense.Category.Name,
-                CategoryColor = expense.Category.ColorCode,
-                Amount = expense.Amount,
-                Date = expense.Date,
-                Note = expense.Note
-            };
+            return MapToDto(expense);
         }
 
         public async Task<ExpenseDto?> UpdateExpenseAsync(int id, CreateExpenseRequest request, int userId)
@@ -290,18 +336,16 @@ namespace FrozenApi.Services
 
             var category = await _context.ExpenseCategories.FindAsync(request.CategoryId);
             if (category == null)
-            {
                 throw new InvalidOperationException($"Category with ID {request.CategoryId} not found");
-            }
 
             expense.CategoryId = request.CategoryId;
             expense.Amount = request.Amount;
-            expense.Date = DateTime.SpecifyKind(request.Date, DateTimeKind.Utc); // Ensure UTC for PostgreSQL
+            expense.Date = DateTime.SpecifyKind(request.Date, DateTimeKind.Utc);
             expense.Note = request.Note;
+            ApplyCategoryVatDefaults(expense, category, request);
 
             await _context.SaveChangesAsync();
 
-            // Create audit log
             var auditLog = new AuditLog
             {
                 UserId = userId,
@@ -309,22 +353,11 @@ namespace FrozenApi.Services
                 Details = $"Expense ID: {id}, Category: {category.Name}, Amount: {request.Amount:C}",
                 CreatedAt = DateTime.UtcNow
             };
-
             _context.AuditLogs.Add(auditLog);
             await _context.SaveChangesAsync();
 
             await _context.Entry(expense).Reference(e => e.Category).LoadAsync();
-
-            return new ExpenseDto
-            {
-                Id = expense.Id,
-                CategoryId = expense.CategoryId,
-                CategoryName = expense.Category.Name,
-                CategoryColor = expense.Category.ColorCode,
-                Amount = expense.Amount,
-                Date = expense.Date,
-                Note = expense.Note
-            };
+            return MapToDto(expense);
         }
 
         public async Task<bool> DeleteExpenseAsync(int id, int userId)
@@ -362,6 +395,68 @@ namespace FrozenApi.Services
                 .OrderBy(c => c.Name)
                 .Select(c => c.Name)
                 .ToListAsync();
+        }
+
+        public async Task<BulkVatUpdateResult> BulkVatUpdateAsync(BulkVatUpdateRequest request, int userId)
+        {
+            var result = new BulkVatUpdateResult();
+            var vatRate = request.VatRate;
+            if (vatRate <= 0 || vatRate > 1) vatRate = 0.05m;
+            var isExtract = string.Equals(request.Interpretation, "extract-from-amount", StringComparison.OrdinalIgnoreCase);
+
+            IQueryable<Expense> query;
+            if (request.ExpenseIds != null && request.ExpenseIds.Count > 0)
+                query = _context.Expenses.Where(e => request.ExpenseIds.Contains(e.Id));
+            else if (request.AllNoVat)
+                query = _context.Expenses.Where(e => e.VatRate == null);
+            else if (request.CategoryId.HasValue)
+                query = _context.Expenses.Where(e => e.CategoryId == request.CategoryId.Value && e.VatRate == null);
+            else
+                return result;
+
+            var expenses = await query.Include(e => e.Category).ToListAsync();
+            foreach (var expense in expenses)
+            {
+                try
+                {
+                    decimal netAmount, vatAmount, totalAmount;
+                    if (isExtract)
+                    {
+                        totalAmount = expense.Amount;
+                        netAmount = Math.Round(expense.Amount / (1 + vatRate), 2);
+                        vatAmount = totalAmount - netAmount;
+                        expense.Amount = netAmount;
+                    }
+                    else
+                    {
+                        netAmount = expense.Amount;
+                        vatAmount = Math.Round(expense.Amount * vatRate, 2);
+                        totalAmount = netAmount + vatAmount;
+                    }
+                    expense.VatRate = vatRate;
+                    expense.VatAmount = vatAmount;
+                    expense.TotalAmount = totalAmount;
+                    expense.TaxType = request.TaxType;
+                    expense.IsTaxClaimable = request.IsTaxClaimable;
+                    expense.IsEntertainment = false;
+
+                    _context.AuditLogs.Add(new AuditLog
+                    {
+                        UserId = userId,
+                        Action = "Expense Bulk VAT Update",
+                        Details = $"Expense ID: {expense.Id}, {request.Interpretation}, VatRate: {vatRate}, Net: {netAmount}, VAT: {vatAmount}, Total: {totalAmount}",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                    result.Updated++;
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"Expense {expense.Id}: {ex.Message}");
+                    result.Skipped++;
+                }
+            }
+            await _context.SaveChangesAsync();
+            return result;
         }
     }
 }

@@ -276,6 +276,23 @@ namespace FrozenApi.Services
                 .Replace("{{grand_total}}", sale.GrandTotal.ToString("N2"))
                 .Replace("{{amount_in_words}}", amountInWords);
 
+            // Round-off row: only when non-zero (format: -0.20 or +0.30)
+            var roundOffRowHtml = "";
+            if (sale.RoundOff != 0)
+            {
+                var roundOffFormatted = sale.RoundOff > 0 ? "+" + sale.RoundOff.ToString("N2") : sale.RoundOff.ToString("N2");
+                var amountClass = sale.RoundOff < 0 ? "negative" : "positive";
+                roundOffRowHtml = $@"<tr class=""totals-row round-off-row"" style=""background-color:transparent;"">
+                    <td colspan=""5"" class=""left bold"" style=""vertical-align: middle; padding:1px; font-size:10pt;"">
+                        <strong>Round Off</strong><span class=""arabic"" style=""float:right; direction:rtl; font-size:10px;"">تقريب</span>
+                    </td>
+                    <td class=""center"" style=""vertical-align: middle; padding:1px;""></td>
+                    <td class=""center"" style=""vertical-align: middle; padding:1px;""></td>
+                    <td class=""center bold totals {amountClass}"" style=""vertical-align: middle; padding:1px;"">{roundOffFormatted}</td>
+                </tr>";
+            }
+            processedHtml = processedHtml.Replace("{{round_off_row}}", roundOffRowHtml);
+
             // Generate items rows HTML - Column order: SL.No, Description, Unit (numeric qty), Qty (unit type), Unit Price, Total, Vat 5%, Amount
             var itemsRowsHtml = new System.Text.StringBuilder();
             int itemIndex = 1;

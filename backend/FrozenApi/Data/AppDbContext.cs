@@ -1,6 +1,6 @@
 /*
 Purpose: Database context for Entity Framework Core
-Author: AI Assistant
+
 Date: 2024
 */
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +48,8 @@ namespace FrozenApi.Data
         public DbSet<PaymentIdempotency> PaymentIdempotencies { get; set; }
         public DbSet<InvoiceTemplate> InvoiceTemplates { get; set; }
         public DbSet<Alert> Alerts { get; set; }
+        public DbSet<PaymentReceipt> PaymentReceipts { get; set; }
+        public DbSet<PaymentReceiptPayment> PaymentReceiptPayments { get; set; }
 
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -130,6 +132,7 @@ namespace FrozenApi.Data
                 entity.Property(e => e.Subtotal).HasColumnType("decimal(18,2)");
                 entity.Property(e => e.VatTotal).HasColumnType("decimal(18,2)");
                 entity.Property(e => e.Discount).HasColumnType("decimal(18,2)");
+                entity.Property(e => e.RoundOff).HasColumnType("decimal(10,4)");
                 entity.Property(e => e.GrandTotal).HasColumnType("decimal(18,2)");
                 entity.Property(e => e.PaymentStatus).HasConversion<string>(); // SalePaymentStatus enum
                 entity.Property(e => e.IsDeleted).HasDefaultValue(false);
@@ -265,6 +268,23 @@ namespace FrozenApi.Data
                 entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy);
             });
             
+            // PaymentReceipt configuration
+            modelBuilder.Entity<PaymentReceipt>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.ReceiptNumber).IsRequired().HasMaxLength(30);
+                entity.HasIndex(e => e.ReceiptNumber).IsUnique();
+                entity.Property(e => e.PdfStoragePath).HasMaxLength(500);
+                entity.HasOne(e => e.GeneratedByUser).WithMany().HasForeignKey(e => e.GeneratedByUserId);
+            });
+
+            modelBuilder.Entity<PaymentReceiptPayment>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.PaymentReceipt).WithMany(r => r.PaymentLinks).HasForeignKey(e => e.PaymentReceiptId);
+                entity.HasOne(e => e.Payment).WithMany().HasForeignKey(e => e.PaymentId);
+            });
+
             // PaymentIdempotency configuration (idempotency)
             modelBuilder.Entity<PaymentIdempotency>(entity =>
             {
@@ -292,6 +312,8 @@ namespace FrozenApi.Data
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
                 entity.HasIndex(e => e.Name).IsUnique();
+                entity.Property(e => e.DefaultVatRate).HasColumnType("decimal(5,4)");
+                entity.Property(e => e.DefaultTaxType).HasMaxLength(20);
             });
 
             // Expense configuration
@@ -299,6 +321,10 @@ namespace FrozenApi.Data
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+                entity.Property(e => e.VatRate).HasColumnType("decimal(5,4)");
+                entity.Property(e => e.VatAmount).HasColumnType("decimal(18,2)");
+                entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+                entity.Property(e => e.TaxType).HasMaxLength(20);
                 entity.HasOne(e => e.Category).WithMany(c => c.Expenses).HasForeignKey(e => e.CategoryId);
                 entity.HasOne(e => e.CreatedByUser).WithMany().HasForeignKey(e => e.CreatedBy);
             });

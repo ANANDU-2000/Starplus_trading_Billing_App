@@ -328,6 +328,7 @@ namespace FrozenApi.Controllers
                     CustomerName = "Sample Customer",
                     Subtotal = 1736.00m,
                     VatTotal = 86.80m,
+                    RoundOff = 0m,
                     GrandTotal = 1822.80m,
                     Items = new List<SaleItemDto>
                     {

@@ -41,6 +41,7 @@ const PosPage = () => {
   const [notes, setNotes] = useState('')
   const [discount, setDiscount] = useState(0)
   const [discountInput, setDiscountInput] = useState('')
+  const [roundOff, setRoundOff] = useState(0)
   const [loading, setLoading] = useState(false)
   const [showInvoiceOptionsModal, setShowInvoiceOptionsModal] = useState(false)
   const [lastCreatedInvoice, setLastCreatedInvoice] = useState(null)
@@ -137,13 +138,14 @@ const PosPage = () => {
           }
         }
 
-        // Set discount and notes
+        // Set discount, round-off and notes
         if (sale.discount) {
           setDiscount(sale.discount)
           setDiscountInput(sale.discount.toString())
         } else {
           setDiscountInput('')
         }
+        setRoundOff(typeof sale.roundOff === 'number' ? sale.roundOff : 0)
         if (sale.notes) setNotes(sale.notes)
 
         // Load cart items from sale
@@ -399,9 +401,19 @@ const PosPage = () => {
     
     const vatTotal = cart.reduce((sum, item) => sum + (item.vatAmount || 0), 0)
     const discountValue = typeof discount === 'number' ? discount : 0
-    const grandTotal = subtotal + vatTotal - discountValue
+    const roundOffValue = typeof roundOff === 'number' ? roundOff : 0
+    const grandTotal = subtotal + vatTotal - discountValue + roundOffValue
     
     return { subtotal, vatTotal, grandTotal }
+  }
+
+  const autoRoundOff = () => {
+    const { subtotal, vatTotal } = calculateTotals()
+    const discountValue = typeof discount === 'number' ? discount : 0
+    const calcTotal = subtotal + vatTotal - discountValue
+    const rounded = Math.round(calcTotal)
+    const diff = rounded - calcTotal
+    if (Math.abs(diff) <= 1) setRoundOff(parseFloat(diff.toFixed(2)))
   }
 
   const handleDownloadPdf = async (saleId, invoiceNo) => {
@@ -742,6 +754,7 @@ const PosPage = () => {
           unitPrice: Number(item.unitPrice) || 0
         })).filter(item => item.productId && item.qty > 0 && item.unitPrice > 0), // Filter out invalid items
         discount: discount || 0,
+        roundOff: typeof roundOff === 'number' ? roundOff : 0,
         // Only include payment if method is not "Pending" and amount is provided or should use full amount
         payments: (paymentMethod !== 'Pending') ? [{
           method: paymentMethod,
@@ -775,6 +788,7 @@ const PosPage = () => {
           customerId: saleData.customerId,
           items: saleData.items,
           discount: saleData.discount,
+          roundOff: saleData.roundOff ?? roundOff,
           payments: saleData.payments || [],
           notes: saleData.notes || null,
           ...(saleData.editReason && { editReason: saleData.editReason }),
@@ -979,6 +993,7 @@ const PosPage = () => {
     setNotes('')
     setDiscount(0)
     setDiscountInput('')
+    setRoundOff(0)
     setProductSearchTerms({}) // Clear all search terms
     setIsEditMode(false)
     setEditingSaleId(null)
@@ -1549,6 +1564,27 @@ const PosPage = () => {
                     <span className="font-bold text-red-600">-AED {discount.toFixed(2)}</span>
                   </div>
                 )}
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-700 font-medium">Round Off <span className="text-gray-500 font-normal">تقريب</span></span>
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={autoRoundOff} className="text-xs text-blue-600 font-medium px-1.5 py-0.5 rounded border border-blue-300 bg-blue-50">Auto</button>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="-1"
+                      max="1"
+                      className="w-16 text-right border border-gray-300 rounded px-1.5 py-1 text-xs font-semibold"
+                      value={roundOff === 0 ? '' : roundOff}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === '') { setRoundOff(0); return }
+                        const n = parseFloat(v)
+                        if (!isNaN(n) && n >= -1 && n <= 1) setRoundOff(n)
+                      }}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
                 <div className="flex justify-between items-center pt-2 mt-2 border-t-2 border-blue-300">
                   <span className="text-gray-900 font-bold text-sm">GRAND TOTAL:</span>
                   <span className="font-bold text-green-700 text-base">AED {totals.grandTotal.toFixed(2)}</span>
@@ -1670,6 +1706,27 @@ const PosPage = () => {
                     <span className="font-bold text-xs sm:text-sm whitespace-nowrap">-AED {discount.toFixed(2)}</span>
                   </div>
                 )}
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-medium text-gray-700">Round Off <span className="text-gray-500">تقريب</span></span>
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={autoRoundOff} className="text-[10px] text-blue-600 font-medium px-1 py-0.5 rounded border border-blue-300 bg-blue-50 whitespace-nowrap">Auto</button>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="-1"
+                      max="1"
+                      className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs"
+                      value={roundOff === 0 ? '' : roundOff}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === '') { setRoundOff(0); return }
+                        const n = parseFloat(v)
+                        if (!isNaN(n) && n >= -1 && n <= 1) setRoundOff(n)
+                      }}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
                 <div className="flex justify-between items-center text-xs sm:text-sm font-bold border-t border-gray-400 pt-1.5">
                   <span className="text-gray-800">Total</span>
                   <span className="text-green-700 text-sm sm:text-base whitespace-nowrap">AED {totals.grandTotal.toFixed(2)}</span>
@@ -1902,13 +1959,15 @@ const PosPage = () => {
                           unitPrice: Number(item.unitPrice)
                         })),
                         discount: discount || 0,
+                        roundOff: typeof roundOff === 'number' ? roundOff : 0,
                         payments: paymentAmount ? [{
                           method: paymentMethod,
                           amount: parseFloat(paymentAmount)
                         }] : [],
                         notes: notes || null,
                         ...(editReason && { editReason: editReason }),
-                        ...(editingSale?.rowVersion && { rowVersion: editingSale.rowVersion })
+                        ...(editingSale?.rowVersion && { rowVersion: editingSale.rowVersion }),
+                        ...(invoiceDate && { invoiceDate: `${invoiceDate}T12:00:00.000Z` })
                       }
                       const response = await salesAPI.updateSale(editingSaleId, saleData)
                       if (response.success) {
