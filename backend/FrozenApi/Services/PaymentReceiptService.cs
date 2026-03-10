@@ -312,23 +312,12 @@ th{{background:#f0f0f0;}}
 <div style=""margin-top:12px;""><strong>Receipt No:</strong> {dto.ReceiptNumber} &nbsp; <strong>Date:</strong> {dto.GeneratedAt:dd-MM-yyyy}</div>
 <div style=""margin-top:8px;"">{dto.CompanyNameEn}<br/>{dto.CompanyAddress} | TRN: {dto.CompanyTrn} | {dto.CompanyPhone}</div>
 <div style=""margin-top:12px;""><strong>Received From:</strong> {dto.CustomerName}<br/>TRN: {dto.CustomerTrn ?? "-"}<br/>{dto.CustomerAddress ?? ""}</div>
-<div style=""margin-top:12px;font-size:18px;""><strong>Amount Received (AED):</strong> {dto.TotalAmount:N2}</div>
-<div style=""margin-top:4px;font-style:italic;"">Amount in Words: {dto.AmountInWords}</div>
 <div style=""margin-top:8px;""><strong>Payment Method:</strong> {string.Join(", ", dto.Payments.Select(p => p.Method + (p.Reference != null ? " - " + p.Reference : "")))}</div>
 <table style=""margin-top:12px;"">
-<thead><tr><th>Invoice No</th><th>Date</th><th>Invoice Total</th><th>Amount Applied</th></tr></thead>
+<thead><tr><th>Invoice No</th><th>Date</th><th>Invoice Total</th><th>Paid Amount</th></tr></thead>
 <tbody>{invoicesRows}</tbody>
 </table>
-<div style=""margin-top:12px;"">
-<strong>Previous balance (before these payments):</strong> {dto.PreviousBalance:N2} AED<br/>
-<strong>Amount paid (this receipt):</strong> {dto.AmountPaid:N2} AED<br/>
-<strong>{(dto.RemainingBalance < 0 ? "Credit (balance in your favour)" : "Balance after this receipt (as of " + dto.GeneratedAt.ToString("dd-MM-yyyy") + "):")}</strong> {(dto.RemainingBalance < 0 ? (-dto.RemainingBalance).ToString("N2") : dto.RemainingBalance.ToString("N2"))} AED
-</div>
-<div style=""margin-top:10px;padding:8px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;"">
-<strong>Customer summary (as of {dto.CurrentOutstandingAsOfDate:dd-MM-yyyy}):</strong><br/>
-Pending bills: {dto.PendingBillsCount} &nbsp; | &nbsp; Total outstanding: {dto.CurrentTotalOutstanding:N2} AED
-</div>
-<div style=""margin-top:8px;font-size:11px;color:#555;"">Invoices on this receipt: {dto.Invoices.Count} &nbsp; | &nbsp; Generated on {dto.GeneratedAt:dd-MM-yyyy HH:mm}</div>
+<div style=""margin-top:12px;font-weight:bold;"">Total Paid: {dto.TotalAmount:N2} AED</div>
 <div style=""margin-top:24px;"">Received by: _______________________ &nbsp; For {dto.CompanyNameEn}</div>
 <div style=""margin-top:8px;font-size:10px;color:#666;"">This is a computer generated receipt.</div>
 </body></html>";

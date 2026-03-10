@@ -105,6 +105,9 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
             {receipt?.receiptNumber && (
               <span className="ml-2 text-gray-600 font-normal">
                 {receipt.receiptNumber}
+                {paymentIds?.length > 1 && (
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Combined receipt for {paymentIds.length} payments</span>
+                )}
                 {receipt.isReprint && (
                   <span className="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Reprint</span>
                 )}
