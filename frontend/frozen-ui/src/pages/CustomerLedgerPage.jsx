@@ -23,10 +23,13 @@ import {
   X,
   Edit,
   Trash2,
-  Wallet
+  Wallet,
+  Loader2
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { formatCurrency, formatBalance } from '../utils/currency'
+import { parseApiErrorBlobMessage, validatePdfBlob } from '../utils/pdfBlob'
+import { isNetworkErrorToSuppress } from '../utils/apiError'
 import { LoadingCard, LoadingButton } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import Modal from '../components/Modal'
@@ -42,6 +45,7 @@ const CustomerLedgerPage = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [paymentLoading, setPaymentLoading] = useState(false) // Separate loading state for payment submission
+  const [pdfLoading, setPdfLoading] = useState(false)
   const [customerLoading, setCustomerLoading] = useState(false) // Separate loading state for customer creation
   
   // Use refs to track loading state synchronously (prevents race conditions)
@@ -88,6 +92,8 @@ const CustomerLedgerPage = () => {
   
   // Keyboard shortcuts refs
   const searchInputRef = useRef(null)
+  const handleExportPDFRef = useRef(null)
+  const handleExportStatementRef = useRef(null)
   
   // Separate form instances for customer and payment forms
   const customerForm = useForm()
@@ -258,14 +264,16 @@ const CustomerLedgerPage = () => {
       if (e.key === 'F5' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault()
         if (selectedCustomer) {
-          handleExportStatement()
+          void handleExportStatementRef.current?.().catch((err) =>
+            console.error('Statement PDF:', err)
+          )
         }
       }
       // F7 - Export PDF
       if (e.key === 'F7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault()
         if (selectedCustomer) {
-          handleExportPDF()
+          void handleExportPDFRef.current?.().catch((err) => console.error('Ledger PDF:', err))
         }
       }
     }
@@ -477,7 +485,7 @@ const CustomerLedgerPage = () => {
       // Remove from in-progress set after delay to prevent rapid re-calls
       setTimeout(() => {
         recalculateInProgress.current.delete(customerId)
-      }, 5000) // 5 second cooldown
+      }, 1000)
     }
   }
   
@@ -1152,12 +1160,18 @@ const CustomerLedgerPage = () => {
       toast.error('Please select a customer first')
       return
     }
+    if (selectedCustomer.id === 'cash') {
+      toast.error('Not available for cash customer view')
+      return
+    }
 
     const customerId = selectedCustomer.id
     const customerName = selectedCustomer.name || 'Customer'
     const fromStr = dateRange.from
     const toStr = dateRange.to
 
+    setPdfLoading(true)
+    const loadingToast = toast.loading('Generating ledger PDF...')
     try {
       const fromDate = new Date(fromStr)
       const toDate = new Date(toStr)
@@ -1174,28 +1188,136 @@ const CustomerLedgerPage = () => {
       )
 
       if (selectedCustomerIdRef.current !== customerId) {
-        toast.error('Customer selection changed. Statement was not saved.')
+        toast.error('Customer selection changed.')
         return
       }
 
-      const url = window.URL.createObjectURL(pdfBlob)
+      const pdfCheck = await validatePdfBlob(pdfBlob)
+      if (!pdfCheck.ok) {
+        toast.error(pdfCheck.message)
+        return
+      }
+
+      const url = window.URL.createObjectURL(pdfCheck.blob)
+      try {
+        const viewA = document.createElement('a')
+        viewA.href = url
+        viewA.target = '_blank'
+        viewA.rel = 'noopener noreferrer'
+        viewA.style.display = 'none'
+        document.body.appendChild(viewA)
+        viewA.click()
+        document.body.removeChild(viewA)
+      } catch {
+        try {
+          window.open(url, '_blank', 'noopener,noreferrer')
+        } catch {
+          /* popup blocked — download still works */
+        }
+      }
       const a = document.createElement('a')
       a.href = url
       a.download = `Ledger_${customerName}_${new Date().toISOString().split('T')[0]}.pdf`
       document.body.appendChild(a)
       a.click()
-      window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
-      toast.success('PDF downloaded successfully')
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+      toast.success('PDF ready — opened in new tab if allowed; also downloading.')
     } catch (error) {
       console.error('Failed to export PDF:', error)
-      toast.error('Failed to export PDF')
+      if (!isNetworkErrorToSuppress(error)) {
+        const msg = await parseApiErrorBlobMessage(error, 'Failed to export PDF')
+        toast.error(msg)
+      }
+    } finally {
+      toast.dismiss(loadingToast)
+      setPdfLoading(false)
+    }
+  }
+
+  const handlePendingBillsPdf = async () => {
+    if (!selectedCustomer || !selectedCustomer.id) {
+      toast.error('Please select a customer first')
+      return
+    }
+    if (selectedCustomer.id === 'cash') {
+      toast.error('Not available for cash customer view')
+      return
+    }
+
+    const customerId = selectedCustomer.id
+    const customerName = selectedCustomer.name || 'Customer'
+    const fromDate = dateRange.from
+    const toDate = dateRange.to
+
+    setPdfLoading(true)
+    const loadingToast = toast.loading('Generating PDF...')
+    try {
+      if (selectedCustomerIdRef.current !== customerId) {
+        toast.error('Customer selection changed. Please try again.')
+        return
+      }
+
+      const pdfBlob = await customersAPI.getCustomerPendingBillsPdf(
+        customerId,
+        fromDate,
+        toDate
+      )
+
+      if (selectedCustomerIdRef.current !== customerId) {
+        toast.error('Customer selection changed.')
+        return
+      }
+
+      const pdfCheck = await validatePdfBlob(pdfBlob)
+      if (!pdfCheck.ok) {
+        toast.error(pdfCheck.message)
+        return
+      }
+
+      const url = window.URL.createObjectURL(pdfCheck.blob)
+      try {
+        const viewA = document.createElement('a')
+        viewA.href = url
+        viewA.target = '_blank'
+        viewA.rel = 'noopener noreferrer'
+        viewA.style.display = 'none'
+        document.body.appendChild(viewA)
+        viewA.click()
+        document.body.removeChild(viewA)
+      } catch {
+        try {
+          window.open(url, '_blank', 'noopener,noreferrer')
+        } catch {
+          /* popup blocked */
+        }
+      }
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Pending_Bills_${customerName}_${fromDate}_to_${toDate}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+      toast.success('PDF ready — opened in new tab if allowed; also downloading.')
+    } catch (error) {
+      console.error('Failed to export pending bills PDF:', error)
+      if (!isNetworkErrorToSuppress(error)) {
+        const msg = await parseApiErrorBlobMessage(error, 'Failed to export PDF')
+        toast.error(msg)
+      }
+    } finally {
+      toast.dismiss(loadingToast)
+      setPdfLoading(false)
     }
   }
 
   const handleExportStatement = async () => {
-    handleExportPDF()
+    await handleExportPDF()
   }
+
+  handleExportPDFRef.current = handleExportPDF
+  handleExportStatementRef.current = handleExportStatement
 
   // WhatsApp Sharing Handler
   const handleShareWhatsApp = () => {
@@ -1393,20 +1515,36 @@ const CustomerLedgerPage = () => {
               <p className="text-sm text-gray-600">User: {user?.name || 'Admin'} ({user?.role || 'Admin'})</p>
             </div>
             <div className="flex items-center space-x-1">
-              <button
-                onClick={handleExportPDF}
-                className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                title="Export PDF (F7)"
-              >
-                <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              </button>
-              <button
-                onClick={handleExportPDF}
-                className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                title="Print (Ctrl+P)"
-              >
-                <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              </button>
+              {selectedCustomer?.id && selectedCustomer.id !== 'cash' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleExportPDF}
+                    disabled={pdfLoading}
+                    className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Export PDF (F7)"
+                  >
+                    {pdfLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportPDF}
+                    disabled={pdfLoading}
+                    className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Ledger PDF (same as F7)"
+                  >
+                    {pdfLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
+                    ) : (
+                      <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    )}
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => selectedCustomer && loadCustomerData(selectedCustomer.id)}
                 className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
@@ -1577,62 +1715,52 @@ const CustomerLedgerPage = () => {
                         </button>
                       </>
                     )}
-                    <button
-                      onClick={handleExportStatement}
-                      className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 transition-colors"
-                      title="Ledger Statement (F5)"
-                    >
-                      <FileText className="h-3 w-3" />
-                      <span className="hidden lg:inline">Statement</span>
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          if (!selectedCustomer || !selectedCustomer.id) {
-                            toast.error('Please select a customer first')
-                            return
-                          }
-                          
-                          const fromDate = dateRange.from
-                          const toDate = dateRange.to
-                          
-                          const loadingToast = toast.loading('Generating PDF...')
-                          const pdfBlob = await customersAPI.getCustomerPendingBillsPdf(
-                            selectedCustomer.id,
-                            fromDate,
-                            toDate
-                          )
-                          
-                          const url = window.URL.createObjectURL(pdfBlob)
-                          const a = document.createElement('a')
-                          a.href = url
-                          a.download = `Pending_Bills_${selectedCustomer.name}_${fromDate}_to_${toDate}.pdf`
-                          document.body.appendChild(a)
-                          a.click()
-                          window.URL.revokeObjectURL(url)
-                          document.body.removeChild(a)
-                          toast.dismiss(loadingToast)
-                          toast.success('PDF downloaded!')
-                        } catch (error) {
-                          console.error('Failed to export pending bills PDF:', error)
-                          toast.dismiss()
-                          toast.error(error.response?.data?.message || 'Failed to export PDF')
-                        }
-                      }}
-                      className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 flex items-center gap-1 transition-colors"
-                      title="Pending Bills PDF (Outstanding Invoices Only) - Uses Date Filter"
-                    >
-                      <DollarSign className="h-3 w-3" />
-                      <span className="hidden lg:inline">Pending Bills</span>
-                    </button>
-                    <button
-                      onClick={handleExportPDF}
-                      className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-800 flex items-center gap-1 transition-colors"
-                      title="Full Ledger PDF (F7)"
-                    >
-                      <Download className="h-3 w-3" />
-                      <span className="hidden lg:inline">PDF</span>
-                    </button>
+                    {selectedCustomer.id !== 'cash' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleExportStatement}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Ledger Statement (F5)"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <FileText className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Statement</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePendingBillsPdf}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Pending Bills PDF (Outstanding Invoices Only) - Uses Date Filter"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <DollarSign className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Pending Bills</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExportPDF}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-800 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Full Ledger PDF (F7)"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Download className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">PDF</span>
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={handleShareWhatsApp}
                       className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600 flex items-center transition-colors"
@@ -1725,6 +1853,7 @@ const CustomerLedgerPage = () => {
                       customer={selectedCustomer}
                       onExportExcel={handleExportExcel}
                       onGeneratePDF={handleExportStatement}
+                      pdfLoading={pdfLoading}
                       onShareWhatsApp={handleShareWhatsApp}
                       onPrintPreview={handlePrintPreview}
                       filters={ledgerFilters}
@@ -2256,7 +2385,17 @@ const CustomerLedgerPage = () => {
 // Add Customer Modal Component removed - now using inline Modal in main component
 
 // Ledger Statement Tab Component - Tally Style Redesign
-const LedgerStatementTab = ({ ledgerEntries, customer, onExportExcel, onGeneratePDF, onShareWhatsApp, onPrintPreview, filters, onFilterChange }) => {
+const LedgerStatementTab = ({
+  ledgerEntries,
+  customer,
+  onExportExcel,
+  onGeneratePDF,
+  pdfLoading,
+  onShareWhatsApp,
+  onPrintPreview,
+  filters,
+  onFilterChange
+}) => {
   const closingBalance = ledgerEntries.length > 0 ? ledgerEntries[ledgerEntries.length - 1].balance : 0
   const totalDebit = ledgerEntries.reduce((sum, e) => sum + (e.debit || 0), 0)
   const totalCredit = ledgerEntries.reduce((sum, e) => sum + (e.credit || 0), 0)
@@ -2331,11 +2470,17 @@ const LedgerStatementTab = ({ ledgerEntries, customer, onExportExcel, onGenerate
               <span>Excel</span>
             </button>
             <button
+              type="button"
               onClick={onGeneratePDF}
-              className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center space-x-1"
+              disabled={pdfLoading}
+              className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Download PDF Statement"
             >
-              <Printer className="h-3 w-3" />
+              {pdfLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Printer className="h-3 w-3" />
+              )}
               <span>PDF</span>
             </button>
             <button
