@@ -50,6 +50,8 @@ const CustomerLedgerPage = () => {
   const recalculateInProgress = useRef(new Set()) // Track recalculate calls to prevent flooding
   const validationToastShownRef = useRef({ balance: null, paymentIntegrity: null }) // { balance: { customerId, at }, paymentIntegrity: { customerId, at } }
   const recalcJustRanRef = useRef(null) // { customerId, at } - skip balance block if same customer ran recalc recently
+  /** Always current selected customer id — use after await in loadCustomerData (avoids stale closure when switching customers). */
+  const selectedCustomerIdRef = useRef(null)
   const VALIDATION_TOAST_THROTTLE_MS = 15000
   const RECALC_COOLDOWN_MS = 8000
   const [customers, setCustomers] = useState([])
@@ -176,6 +178,10 @@ const CustomerLedgerPage = () => {
     }
   }
 
+  useEffect(() => {
+    selectedCustomerIdRef.current = selectedCustomer?.id ?? null
+  }, [selectedCustomer])
+
   // Load all customers
   useEffect(() => {
     fetchCustomers()
@@ -208,7 +214,7 @@ const CustomerLedgerPage = () => {
     if (selectedCustomer) {
       const timeoutId = setTimeout(() => {
         loadCustomerData(selectedCustomer.id)
-      }, 300) // 300ms debounce
+      }, 100) // debounce: avoid duplicate calls when switching customer + date quickly
       return () => clearTimeout(timeoutId)
     }
   }, [selectedCustomer?.id, dateRange.from, dateRange.to])
@@ -567,12 +573,10 @@ const CustomerLedgerPage = () => {
       return
     }
     
-    // Double-check that we're still loading for the same customer
-    if (selectedCustomer && selectedCustomer.id !== customerId) {
-      console.warn('Customer changed during load, aborting data load for customer:', customerId)
+    if (selectedCustomerIdRef.current !== customerId) {
       return
     }
-    
+
     try {
       setLoading(true)
       
@@ -599,9 +603,7 @@ const CustomerLedgerPage = () => {
         customersAPI.getCustomer(customerId)
       ])
 
-      // CRITICAL: Verify we're still loading for the same customer after API calls
-      if (selectedCustomer && selectedCustomer.id !== customerId) {
-        console.warn('Customer changed after API calls, discarding data for customer:', customerId)
+      if (selectedCustomerIdRef.current !== customerId) {
         return
       }
 
@@ -674,12 +676,10 @@ const CustomerLedgerPage = () => {
       // Load payments separately
       const paymentsRes = await paymentsAPI.getPayments({ page: 1, pageSize: 1000, customerId })
       
-      // CRITICAL: Verify we're still loading for the same customer after payment API call
-      if (selectedCustomer && selectedCustomer.id !== customerId) {
-        console.warn('Customer changed after payment API call, discarding data for customer:', customerId)
+      if (selectedCustomerIdRef.current !== customerId) {
         return
       }
-      
+
       if (paymentsRes.success && paymentsRes.data) {
         const allPayments = paymentsRes.data.items || []
         // CRITICAL: Strictly filter payments by customerId to prevent mismatches
@@ -708,7 +708,11 @@ const CustomerLedgerPage = () => {
           customerPayments,
           customerRes.success ? customerRes.data : null
         )
-        
+
+        if (selectedCustomerIdRef.current !== customerId) {
+          return
+        }
+
         // If validation found critical errors, show warning and attempt to fix
         if (!validationReport.isValid && validationReport.errors.length > 0) {
           console.error('❌ CRITICAL DATA VALIDATION ERRORS:', validationReport.errors)
@@ -802,12 +806,13 @@ const CustomerLedgerPage = () => {
   }
 
   const handleSelectCustomer = (customer) => {
-    // CRITICAL: Clear all customer data when switching customers to prevent data mismatches
     setCustomerLedger([])
     setCustomerInvoices([])
     setCustomerPayments([])
     setOutstandingInvoices([])
     setCustomerSummary(null)
+    setLedgerFilters({ status: 'all', type: 'all' })
+    setSelectedPaymentIds([])
     setSelectedCustomer(customer)
     setSearchTerm('')
     validationToastShownRef.current = { balance: null, paymentIntegrity: null }
@@ -1147,30 +1152,36 @@ const CustomerLedgerPage = () => {
       toast.error('Please select a customer first')
       return
     }
-    
-    // CRITICAL: Store customer ID to prevent race conditions
+
     const customerId = selectedCustomer.id
-    
+    const customerName = selectedCustomer.name || 'Customer'
+    const fromStr = dateRange.from
+    const toStr = dateRange.to
+
     try {
-      const fromDate = new Date(dateRange.from)
-      const toDate = new Date(dateRange.to)
-      
-      // Validate customer is still selected before generating statement
-      if (!selectedCustomer || selectedCustomer.id !== customerId) {
+      const fromDate = new Date(fromStr)
+      const toDate = new Date(toStr)
+
+      if (selectedCustomerIdRef.current !== customerId) {
         toast.error('Customer selection changed. Please try again.')
         return
       }
-      
+
       const pdfBlob = await customersAPI.getCustomerStatement(
         customerId,
         fromDate.toISOString(),
         toDate.toISOString()
       )
-      
+
+      if (selectedCustomerIdRef.current !== customerId) {
+        toast.error('Customer selection changed. Statement was not saved.')
+        return
+      }
+
       const url = window.URL.createObjectURL(pdfBlob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Ledger_${selectedCustomer.name}_${new Date().toISOString().split('T')[0]}.pdf`
+      a.download = `Ledger_${customerName}_${new Date().toISOString().split('T')[0]}.pdf`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
