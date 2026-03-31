@@ -1,22 +1,23 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { X, Download, Printer } from 'lucide-react'
 import { paymentsAPI } from '../services'
 import toast from 'react-hot-toast'
 import { validateHtmlReceiptBlob } from '../utils/pdfBlob'
-import { triggerBlobDownload } from '../utils/blobDownload'
-
-function downloadHtmlAsFile (html, filename) {
-  triggerBlobDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), filename)
-}
+import {
+  triggerBlobDownload,
+  tryOpenBlobInNewTab,
+  isIOSDevice,
+  isLikelyMobileBrowser
+} from '../utils/blobDownload'
 
 /**
- * Print HTML without a second window.open (avoids pop-up blockers). Uses a disposable iframe.
+ * Fallback print: full-viewport invisible iframe (0×0 hidden iframes often print blank on tablets/Safari).
  */
-function printHtmlInHiddenIframe (html) {
+function printHtmlInOffscreenIframe (html) {
   const iframe = document.createElement('iframe')
   iframe.setAttribute('aria-hidden', 'true')
   iframe.style.cssText =
-    'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none'
+    'position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0;pointer-events:none;z-index:2147483646'
   document.body.appendChild(iframe)
 
   const win = iframe.contentWindow
@@ -61,7 +62,7 @@ function printHtmlInHiddenIframe (html) {
   }
 
   requestAnimationFrame(() => {
-    setTimeout(runPrint, 100)
+    setTimeout(runPrint, 150)
   })
 }
 
@@ -70,6 +71,7 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
   const [receipt, setReceipt] = useState(null)
   const [receiptHtml, setReceiptHtml] = useState(null)
   const [error, setError] = useState(null)
+  const previewIframeRef = useRef(null)
 
   useEffect(() => {
     if (!isOpen || !paymentIds?.length) {
@@ -100,7 +102,6 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
           throw new Error(check.message)
         }
         setReceiptHtml(check.html)
-        toast.success(`Receipt ${data.receiptNumber || receiptId} ready`)
       } catch (err) {
         if (!cancelled) {
           const status = err?.response?.status
@@ -126,12 +127,24 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
       return
     }
     const safeName = String(receipt?.receiptNumber || receipt?.id || 'receipt').replace(/[/\\?%*:|"<>]/g, '-')
+    const blob = new Blob([receiptHtml], { type: 'text/html;charset=utf-8' })
     try {
-      downloadHtmlAsFile(receiptHtml, `Receipt-${safeName}.html`)
-      toast.success('Download started')
+      if (isIOSDevice() || isLikelyMobileBrowser()) {
+        if (tryOpenBlobInNewTab(blob)) {
+          toast.success('Opened in a new tab — use Share (iOS) or menu Save as… to keep the file')
+          return
+        }
+        // Pop-up blocked — fall through to programmatic download
+      }
+      triggerBlobDownload(blob, `Receipt-${safeName}.html`)
+      toast.success('Download started — check your downloads folder')
     } catch (e) {
       console.error(e)
-      toast.error('Download failed')
+      if (tryOpenBlobInNewTab(blob)) {
+        toast.success('Opened in a new tab — save from the browser menu')
+      } else {
+        toast.error('Download failed — try Print or allow pop-ups for this site')
+      }
     }
   }
 
@@ -140,11 +153,34 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
       toast.error('Nothing to print yet')
       return
     }
+    const htmlBlob = new Blob([receiptHtml], { type: 'text/html;charset=utf-8' })
     try {
-      printHtmlInHiddenIframe(receiptHtml)
+      // iOS/iPad Safari: iframe.print() is often broken; opening HTML in a new tab works with Share → Print
+      if (isIOSDevice()) {
+        if (tryOpenBlobInNewTab(htmlBlob)) {
+          toast.success('Use Share → Print in the new tab (or browser ⋯ menu)')
+          return
+        }
+      }
+      const previewWin = previewIframeRef.current?.contentWindow
+      if (previewWin) {
+        previewWin.focus()
+        previewWin.print()
+        return
+      }
+      printHtmlInOffscreenIframe(receiptHtml)
     } catch (e) {
       console.error(e)
-      toast.error('Print failed')
+      try {
+        if (tryOpenBlobInNewTab(htmlBlob)) {
+          toast.success('Opened for printing in a new tab')
+          return
+        }
+        printHtmlInOffscreenIframe(receiptHtml)
+      } catch (e2) {
+        console.error(e2)
+        toast.error('Print failed — try Download, then open the file and print')
+      }
     }
   }
 
@@ -188,6 +224,7 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
           )}
           {!loading && !error && receiptHtml && (
             <iframe
+              ref={previewIframeRef}
               id="receipt-preview-iframe"
               title="Receipt"
               srcDoc={receiptHtml}
