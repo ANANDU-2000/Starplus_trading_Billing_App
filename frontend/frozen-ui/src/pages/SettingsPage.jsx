@@ -23,6 +23,7 @@ import Modal from '../components/Modal'
 import { LoadingCard } from '../components/Loading'
 import { adminAPI } from '../services'
 import toast from 'react-hot-toast'
+import { triggerBlobDownload } from '../utils/blobDownload'
 
 const SettingsPage = () => {
   const { user } = useAuth()
@@ -148,15 +149,8 @@ const SettingsPage = () => {
   const handleDownloadBackup = async (fileName) => {
     try {
       const blob = await adminAPI.downloadBackup(fileName)
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-      toast.success('Backup downloaded')
+      triggerBlobDownload(blob, fileName)
+      toast.success('Download started — check your downloads folder')
     } catch (error) {
       toast.error('Failed to download backup')
     }

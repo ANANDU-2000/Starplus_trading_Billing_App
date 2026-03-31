@@ -74,3 +74,42 @@ export async function validatePdfBlob (blob) {
 
   return { ok: false, message: 'Response is not a valid PDF' }
 }
+
+/**
+ * Payment receipt endpoint returns HTML bytes (despite /pdf path). Detect JSON error bodies.
+ */
+export async function validateHtmlReceiptBlob (blob) {
+  if (!blob || blob.size === 0) {
+    return { ok: false, message: 'Empty receipt' }
+  }
+  const type = (blob.type || '').toLowerCase()
+  if (type.includes('json')) {
+    const text = await blob.text()
+    try {
+      const j = JSON.parse(text)
+      return { ok: false, message: j.message || 'Server returned an error instead of a receipt' }
+    } catch {
+      return { ok: false, message: 'Invalid receipt response' }
+    }
+  }
+  const html = await blob.text()
+  const t = html.trimStart()
+  if (t.startsWith('{')) {
+    try {
+      const j = JSON.parse(t)
+      return { ok: false, message: j.message || 'Server returned an error instead of a receipt' }
+    } catch {
+      return { ok: false, message: 'Invalid receipt data' }
+    }
+  }
+  if (
+    t.startsWith('<!DOCTYPE') ||
+    t.startsWith('<html') ||
+    t.startsWith('<HTML') ||
+    t.includes('<body') ||
+    t.includes('<BODY')
+  ) {
+    return { ok: true, html }
+  }
+  return { ok: false, message: 'Receipt is not valid HTML' }
+}

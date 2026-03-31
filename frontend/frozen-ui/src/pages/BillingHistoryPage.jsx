@@ -21,6 +21,8 @@ import { useAuth } from '../hooks/useAuth'
 import { salesAPI } from '../services'
 import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
 import { LoadingCard } from '../components/Loading'
 import { Input } from '../components/Form'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
@@ -208,18 +210,15 @@ const BillingHistoryPage = () => {
     try {
       toast.loading('Generating combined PDF...')
       const blob = await salesAPI.getCombinedInvoicesPdf(selectedInvoices)
-      
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `Combined_Invoices_${new Date().toISOString().split('T')[0]}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-      
+      const check = await validatePdfBlob(blob)
+      if (!check.ok) {
+        toast.dismiss()
+        toast.error(check.message)
+        return
+      }
+      triggerBlobDownload(check.blob, `Combined_Invoices_${new Date().toISOString().split('T')[0]}.pdf`)
       toast.dismiss()
-      toast.success(`Combined PDF generated for ${selectedInvoices.length} invoice(s)`)
+      toast.success(`Download started — combined PDF for ${selectedInvoices.length} invoice(s)`)
       setSelectedInvoices([])
     } catch (error) {
       toast.dismiss()

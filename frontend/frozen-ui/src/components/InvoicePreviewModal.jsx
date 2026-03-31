@@ -3,6 +3,8 @@ import { X, Printer, Download, Share2, Mail, MessageCircle } from 'lucide-react'
 import { salesAPI } from '../services'
 import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
 import PrintOptionsModal from './PrintOptionsModal'
 
 const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => {
@@ -58,26 +60,16 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
         return
       }
       
-      // Ensure it's a proper blob
       const blob = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
-      
-      // Create download link
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.style.display = 'none'
+      const check = await validatePdfBlob(blob)
+      if (!check.ok) {
+        toast.error(check.message)
+        setLoading(false)
+        return
+      }
       const invoiceNumber = invoice?.invoiceNo || invoiceNo || saleId
-      a.download = `invoice_${invoiceNumber}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      
-      // Clean up after a delay
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
-      }, 100)
-      
-      toast.success('Invoice downloaded successfully')
+      triggerBlobDownload(check.blob, `invoice_${invoiceNumber}.pdf`)
+      toast.success('Download started — check your downloads folder')
     } catch (error) {
       console.error('Download error:', error)
       toast.error(error.message || 'Failed to download invoice. Please try again.')
@@ -122,28 +114,16 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
       }
       
       const blob = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
-      
-      // Download PDF first so user can attach it
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.style.display = 'none'
+      const check = await validatePdfBlob(blob)
+      if (!check.ok) {
+        toast.error(check.message)
+        return
+      }
       const invoiceNumber = invoice?.invoiceNo || invoiceNo || saleId
-      a.download = `invoice_${invoiceNumber}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      
-      // Clean up download link
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
-      }, 100)
-      
-      // Open WhatsApp Web with message
+      triggerBlobDownload(check.blob, `invoice_${invoiceNumber}.pdf`)
       const whatsappUrl = `https://wa.me/?text=${encodedMessage}`
       window.open(whatsappUrl, '_blank')
-      
-      toast.success('WhatsApp opened. Please attach the downloaded PDF')
+      toast.success('WhatsApp opened — attach the file from your downloads folder')
     } catch (error) {
       console.error('WhatsApp share error:', error)
       toast.error(error.message || 'Failed to share via WhatsApp. Please try downloading PDF manually.')
@@ -200,29 +180,17 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
         }
         
         const blob = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
-        const url = window.URL.createObjectURL(blob)
-        
-        // Create mailto link with subject and body
+        const check = await validatePdfBlob(blob)
+        if (!check.ok) {
+          toast.error(check.message)
+          return
+        }
+        triggerBlobDownload(check.blob, `invoice_${invoiceNo}.pdf`)
         const subject = encodeURIComponent(`Invoice ${invoiceNo}`)
         const body = encodeURIComponent(`Please find invoice ${invoiceNo} attached.`)
         const mailtoLink = `mailto:${customerEmail}?subject=${subject}&body=${body}`
-        
-        // Download PDF first
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `invoice_${invoiceNo}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        
-        // Open email client
         window.location.href = mailtoLink
-        
-        setTimeout(() => {
-          window.URL.revokeObjectURL(url)
-          document.body.removeChild(a)
-        }, 100)
-        
-        toast.info('Email client opened. Please attach the downloaded PDF')
+        toast.info('Email client opened — attach the downloaded PDF from your downloads folder')
       }
     } catch (error) {
       console.error('Email share error:', error)

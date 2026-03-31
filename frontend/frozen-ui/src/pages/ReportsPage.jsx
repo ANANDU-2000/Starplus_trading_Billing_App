@@ -18,6 +18,8 @@ import toast from 'react-hot-toast'
 import { LoadingCard } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import { reportsAPI, productsAPI, customersAPI, profitAPI, paymentsAPI } from '../services'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
 import { 
   LineChart, 
   Line, 
@@ -777,21 +779,18 @@ const ReportsPage = () => {
     try {
       toast.loading(`Exporting ${format.toUpperCase()} report...`)
       const blob = await reportsAPI.exportReportPdf({ fromDate: dateRange.from, toDate: dateRange.to, format })
-      
-      // Create download link
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `report_${dateRange.from}_${dateRange.to}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      
+      const check = await validatePdfBlob(blob)
+      if (!check.ok) {
+        toast.dismiss()
+        toast.error(check.message)
+        return
+      }
+      triggerBlobDownload(check.blob, `report_${dateRange.from}_${dateRange.to}.pdf`)
       toast.dismiss()
-      toast.success(`${format.toUpperCase()} report exported successfully!`)
+      toast.success('Download started — check your downloads folder')
     } catch (error) {
       console.error('Failed to export report:', error)
+      toast.dismiss()
       toast.error('Failed to export report')
     }
   }
@@ -1620,17 +1619,15 @@ const ReportsPage = () => {
                           fromDate: dateRange.from,
                           toDate: dateRange.to
                         })
-                        
-                        const url = window.URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
-                        a.download = `pending_bills_${dateRange.from}_${dateRange.to}.pdf`
-                        document.body.appendChild(a)
-                        a.click()
-                        a.remove()
-                        window.URL.revokeObjectURL(url)
+                        const check = await validatePdfBlob(blob)
+                        if (!check.ok) {
+                          toast.dismiss()
+                          toast.error(check.message)
+                          return
+                        }
+                        triggerBlobDownload(check.blob, `pending_bills_${dateRange.from}_${dateRange.to}.pdf`)
                         toast.dismiss()
-                        toast.success('PDF downloaded successfully!')
+                        toast.success('Download started — check your downloads folder')
                       } catch (error) {
                         console.error('Failed to export PDF:', error)
                         toast.dismiss()

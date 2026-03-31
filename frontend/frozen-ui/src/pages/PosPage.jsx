@@ -21,6 +21,8 @@ import { productsAPI, salesAPI, customersAPI } from '../services'
 import { formatCurrency, formatBalance, formatBalanceWithColor } from '../utils/currency'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
@@ -419,16 +421,14 @@ const PosPage = () => {
   const handleDownloadPdf = async (saleId, invoiceNo) => {
     try {
       const response = await salesAPI.getInvoicePdf(saleId)
-      const blob = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${invoiceNo || 'invoice'}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-      toast.success('Invoice PDF downloaded')
+      const raw = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
+      const check = await validatePdfBlob(raw)
+      if (!check.ok) {
+        toast.error(check.message)
+        return
+      }
+      triggerBlobDownload(check.blob, `${invoiceNo || 'invoice'}.pdf`)
+      toast.success('Download started — check your downloads folder')
     } catch (error) {
       console.error('Failed to download PDF:', error)
       toast.error('Failed to download PDF')
@@ -493,7 +493,7 @@ const PosPage = () => {
             printWindow.focus()
             printWindow.print()
             toast.dismiss('print-toast')
-            toast.success('Print dialog opened')
+            toast.success('Print dialog opened — if the page is blank, use Download and print from the PDF')
             
             // Clean up URL after delay
             setTimeout(() => {
@@ -586,7 +586,7 @@ const PosPage = () => {
           toast.loading('Attempting to download PDF as alternative...', { id: 'download-toast' })
           await handleDownloadPdf(saleId, invoiceNo)
           toast.dismiss('download-toast')
-          toast.success('PDF downloaded. Open it and press Ctrl+P (Cmd+P on Mac) to print.')
+          toast.success('PDF saved — open it from downloads and use Ctrl+P (Cmd+P) to print')
         } catch (downloadErr) {
           console.error('Download fallback also failed:', downloadErr)
           toast.error('Both print and download failed. Please check the browser console for details.')
@@ -616,28 +616,16 @@ const PosPage = () => {
       // Generate PDF blob first
       try {
         const pdfBlob = await salesAPI.getInvoicePdf(saleId)
-        const blob = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
-        
-        // Download PDF first so user can attach it
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.style.display = 'none'
-        a.download = `invoice_${invoiceNo}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        
-        // Clean up download link
-        setTimeout(() => {
-          window.URL.revokeObjectURL(url)
-          document.body.removeChild(a)
-        }, 100)
-        
-        // Open WhatsApp Web with message
+        const raw = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
+        const check = await validatePdfBlob(raw)
+        if (!check.ok) {
+          toast.error(check.message)
+          return
+        }
+        triggerBlobDownload(check.blob, `invoice_${invoiceNo}.pdf`)
         const whatsappUrl = `https://wa.me/?text=${encodedMessage}`
         window.open(whatsappUrl, '_blank')
-        
-        toast.success('WhatsApp opened. Please attach the downloaded PDF')
+        toast.success('WhatsApp opened — attach the file from your downloads folder')
       } catch (apiError) {
         console.error('API Error:', apiError)
         toast.error(apiError.message || 'Failed to generate PDF')

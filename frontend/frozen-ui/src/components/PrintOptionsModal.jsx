@@ -22,7 +22,7 @@ const PrintOptionsModal = ({ saleId, invoiceNo, onClose, onPrint }) => {
               printWindow.print()
             }, 250)
           }
-          toast.success('Invoice opened for printing')
+          toast.success('Opening invoice in a new tab — use the print dialog there (Ctrl+P if needed)')
         } else {
           toast.error('Please allow pop-ups for this site to print')
         }
@@ -30,7 +30,7 @@ const PrintOptionsModal = ({ saleId, invoiceNo, onClose, onPrint }) => {
         // Thermal printer - download or open PDF
         const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?format=thermal&width=${format === 'thermal58' ? '58' : '80'}`
         window.open(pdfUrl, '_blank')
-        toast.success('Thermal format opened')
+        toast.success('Opening thermal PDF in a new tab')
       }
       
       if (onPrint) onPrint()

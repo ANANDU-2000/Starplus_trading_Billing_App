@@ -4,6 +4,8 @@ import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
 import { LoadingCard } from '../components/Loading'
 import { reportsAPI } from '../services'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
 
 const PERIODS = [
   { value: 'week', label: 'This Week' },
@@ -81,17 +83,16 @@ const WorksheetPage = () => {
         params.toDate = customTo
       }
       const blob = await reportsAPI.exportWorksheetPdf(params)
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
+      const check = await validatePdfBlob(blob)
+      if (!check.ok) {
+        toast.dismiss()
+        toast.error(check.message)
+        return
+      }
       const label = data?.periodLabel ?? data?.PeriodLabel ?? 'worksheet'
-      a.download = `worksheet_${String(label).replace(/\s/g, '_')}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
+      triggerBlobDownload(check.blob, `worksheet_${String(label).replace(/\s/g, '_')}.pdf`)
       toast.dismiss()
-      toast.success('PDF downloaded')
+      toast.success('Download started — check your downloads folder')
     } catch (err) {
       toast.dismiss()
       toast.error(err?.response?.data?.message || 'Failed to export PDF')

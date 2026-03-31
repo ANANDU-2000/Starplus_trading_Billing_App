@@ -27,6 +27,8 @@ import Modal from '../components/Modal'
 import { customersAPI } from '../services'
 import { TabNavigation } from '../components/ui'
 import toast from 'react-hot-toast'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
 
 const CustomersPage = () => {
   const { user } = useAuth()
@@ -275,20 +277,18 @@ const CustomersPage = () => {
     try {
       toast.loading('Generating statement PDF...')
       const blob = await customersAPI.getCustomerStatement(selectedCustomer.id)
-      
-      // Create download link
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `customer_statement_${selectedCustomer.id}_${Date.now()}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      
-      toast.success('Statement exported successfully!')
+      const check = await validatePdfBlob(blob)
+      if (!check.ok) {
+        toast.dismiss()
+        toast.error(check.message)
+        return
+      }
+      triggerBlobDownload(check.blob, `customer_statement_${selectedCustomer.id}_${Date.now()}.pdf`)
+      toast.dismiss()
+      toast.success('Download started — check your downloads folder')
     } catch (error) {
       console.error('Failed to export statement:', error)
+      toast.dismiss()
       toast.error('Failed to export statement')
     }
   }

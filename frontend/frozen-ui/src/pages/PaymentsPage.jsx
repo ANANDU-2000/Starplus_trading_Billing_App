@@ -27,6 +27,8 @@ import { Input, Select } from '../components/Form'
 import Modal from '../components/Modal'
 import { paymentsAPI, customersAPI, salesAPI } from '../services'
 import toast from 'react-hot-toast'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob, validateHtmlReceiptBlob, parseApiErrorBlobMessage } from '../utils/pdfBlob'
 
 const PaymentsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -377,27 +379,44 @@ const PaymentsPage = () => {
 
   const handleDownloadReceipt = async (payment) => {
     try {
-      // If payment has an invoice, download invoice PDF
       if (payment.saleId) {
         const response = await salesAPI.getInvoicePdf(payment.saleId)
-        const blob = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `payment_receipt_${payment.invoiceNo || payment.id}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
-        toast.success('Receipt downloaded successfully')
+        const raw = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
+        const check = await validatePdfBlob(raw)
+        if (!check.ok) {
+          toast.error(check.message)
+          return
+        }
+        triggerBlobDownload(check.blob, `payment_receipt_${payment.invoiceNo || payment.id}.pdf`)
+        toast.success('Download started — check your downloads folder')
       } else {
-        // Generate payment receipt
-        toast.info('Generating payment receipt...')
-        // TODO: Implement payment receipt generation endpoint
+        const tid = toast.loading('Generating payment receipt...')
+        try {
+          const res = await paymentsAPI.generateReceipt(payment.id)
+          const data = res?.data ?? res
+          const receiptId = data?.id ?? data?.Id
+          if (receiptId == null) throw new Error('Invalid receipt response')
+          const pdfRes = await paymentsAPI.getReceiptPdf(receiptId)
+          const blob = pdfRes instanceof Blob ? pdfRes : new Blob([pdfRes])
+          const htmlCheck = await validateHtmlReceiptBlob(blob)
+          if (!htmlCheck.ok) {
+            toast.dismiss(tid)
+            toast.error(htmlCheck.message)
+            return
+          }
+          const safeName = String(data.receiptNumber || receiptId).replace(/[/\\?%*:|"<>]/g, '-')
+          const htmlBlob = new Blob([htmlCheck.html], { type: 'text/html;charset=utf-8' })
+          triggerBlobDownload(htmlBlob, `Receipt-${safeName}.html`)
+          toast.dismiss(tid)
+          toast.success('Download started — check your downloads folder')
+        } catch (e) {
+          toast.dismiss(tid)
+          toast.error(await parseApiErrorBlobMessage(e, 'Failed to generate receipt'))
+        }
       }
     } catch (error) {
       console.error('Failed to download receipt:', error)
-      toast.error('Failed to download receipt')
+      toast.error(await parseApiErrorBlobMessage(error, 'Failed to download receipt'))
     }
   }
 

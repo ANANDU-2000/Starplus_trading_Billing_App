@@ -2,6 +2,68 @@ import React, { useState, useEffect } from 'react'
 import { X, Download, Printer } from 'lucide-react'
 import { paymentsAPI } from '../services'
 import toast from 'react-hot-toast'
+import { validateHtmlReceiptBlob } from '../utils/pdfBlob'
+import { triggerBlobDownload } from '../utils/blobDownload'
+
+function downloadHtmlAsFile (html, filename) {
+  triggerBlobDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), filename)
+}
+
+/**
+ * Print HTML without a second window.open (avoids pop-up blockers). Uses a disposable iframe.
+ */
+function printHtmlInHiddenIframe (html) {
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.cssText =
+    'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none'
+  document.body.appendChild(iframe)
+
+  const win = iframe.contentWindow
+  const doc = iframe.contentDocument || win.document
+  doc.open()
+  doc.write(html)
+  doc.close()
+
+  const cleanup = () => {
+    try {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  let fallbackTimer = null
+  const onAfterPrint = () => {
+    if (fallbackTimer != null) clearTimeout(fallbackTimer)
+    win.removeEventListener('afterprint', onAfterPrint)
+    cleanup()
+  }
+
+  fallbackTimer = setTimeout(() => {
+    win.removeEventListener('afterprint', onAfterPrint)
+    cleanup()
+  }, 10 * 60 * 1000)
+
+  win.addEventListener('afterprint', onAfterPrint)
+
+  const runPrint = () => {
+    try {
+      win.focus()
+      win.print()
+    } catch (e) {
+      console.error('Print failed:', e)
+      toast.error('Print failed. Try Download and open the file instead.')
+      if (fallbackTimer != null) clearTimeout(fallbackTimer)
+      win.removeEventListener('afterprint', onAfterPrint)
+      cleanup()
+    }
+  }
+
+  requestAnimationFrame(() => {
+    setTimeout(runPrint, 100)
+  })
+}
 
 export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose }) {
   const [loading, setLoading] = useState(false)
@@ -26,7 +88,6 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
           ? await paymentsAPI.generateReceipt(ids[0])
           : await paymentsAPI.generateReceiptBatch(ids)
         if (cancelled) return
-        // API returns { success, data: PaymentReceiptDto, message }; receipt id is on the DTO
         const data = res?.data ?? res
         const receiptId = data?.id ?? data?.Id
         if (receiptId == null) throw new Error('Invalid receipt response')
@@ -34,9 +95,12 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
         const pdfRes = await paymentsAPI.getReceiptPdf(receiptId)
         if (cancelled) return
         const blob = pdfRes instanceof Blob ? pdfRes : new Blob([pdfRes])
-        const html = await blob.text()
-        setReceiptHtml(html)
-        toast.success(`Receipt ${data.receiptNumber || receiptId} generated`)
+        const check = await validateHtmlReceiptBlob(blob)
+        if (!check.ok) {
+          throw new Error(check.message)
+        }
+        setReceiptHtml(check.html)
+        toast.success(`Receipt ${data.receiptNumber || receiptId} ready`)
       } catch (err) {
         if (!cancelled) {
           const status = err?.response?.status
@@ -56,42 +120,32 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
     return () => { cancelled = true }
   }, [isOpen, paymentIds?.join(',')])
 
-  const handleDownload = async () => {
-    if (!receipt?.id) return
+  const handleDownload = () => {
+    if (!receiptHtml) {
+      toast.error('Nothing to download yet')
+      return
+    }
+    const safeName = String(receipt?.receiptNumber || receipt?.id || 'receipt').replace(/[/\\?%*:|"<>]/g, '-')
     try {
-      const blob = await paymentsAPI.getReceiptPdf(receipt.id)
-      const b = blob instanceof Blob ? blob : new Blob([blob])
-      const url = URL.createObjectURL(b)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `Receipt-${receipt.receiptNumber || receipt.id}.html`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      downloadHtmlAsFile(receiptHtml, `Receipt-${safeName}.html`)
+      toast.success('Download started')
     } catch (e) {
-      toast.error('Failed to download receipt')
+      console.error(e)
+      toast.error('Download failed')
     }
   }
 
   const handlePrint = () => {
-    if (!receiptHtml) return
-    const printWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes')
-    if (!printWindow) {
-      toast.error('Please allow pop-ups to print the receipt.')
+    if (!receiptHtml) {
+      toast.error('Nothing to print yet')
       return
     }
-    printWindow.document.write(receiptHtml)
-    printWindow.document.close()
-    printWindow.focus()
-    const doPrint = () => {
-      printWindow.print()
-      if (printWindow.onafterprint !== undefined) {
-        printWindow.onafterprint = () => printWindow.close()
-      }
-      setTimeout(() => { if (!printWindow.closed) printWindow.close() }, 1500)
+    try {
+      printHtmlInHiddenIframe(receiptHtml)
+    } catch (e) {
+      console.error(e)
+      toast.error('Print failed')
     }
-    setTimeout(doPrint, 250)
   }
 
   if (!isOpen) return null
@@ -137,8 +191,7 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
               id="receipt-preview-iframe"
               title="Receipt"
               srcDoc={receiptHtml}
-              className="w-full h-[60vh] border rounded"
-              sandbox="allow-same-origin"
+              className="w-full h-[60vh] border rounded bg-white"
             />
           )}
         </div>
@@ -146,7 +199,7 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
           <button
             type="button"
             onClick={handleDownload}
-            disabled={!receipt}
+            disabled={!receiptHtml}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4" />

@@ -1875,7 +1875,7 @@ const CustomerLedgerPage = () => {
                           const pdfBlob = await salesAPI.getInvoicePdf(invoiceId)
                           const url = window.URL.createObjectURL(pdfBlob)
                           window.open(url, '_blank')
-                          setTimeout(() => window.URL.revokeObjectURL(url), 100)
+                          setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
                         } catch (error) {
                           toast.error(error?.message || 'Failed to generate PDF')
                         }
@@ -2093,7 +2093,7 @@ const CustomerLedgerPage = () => {
                   printWindow.print()
                 }
               }
-              setTimeout(() => window.URL.revokeObjectURL(url), 100)
+              setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
             } catch (error) {
               toast.error(error?.message || 'Failed to print invoice')
             }
