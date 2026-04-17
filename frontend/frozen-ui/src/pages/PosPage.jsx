@@ -21,7 +21,7 @@ import { productsAPI, salesAPI, customersAPI } from '../services'
 import { formatCurrency, formatBalance, formatBalanceWithColor } from '../utils/currency'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
-import { triggerBlobDownload, tryOpenBlobInNewTab, isIOSDevice, isLikelyMobileBrowser } from '../utils/blobDownload'
+import { triggerBlobDownload, isIOSDevice, isLikelyMobileBrowser } from '../utils/blobDownload'
 import { validatePdfBlob, parseApiErrorBlobMessage } from '../utils/pdfBlob'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
@@ -420,19 +420,12 @@ const PosPage = () => {
 
   const handleDownloadPdf = async (saleId, invoiceNo) => {
     const safeName = `INV-${(invoiceNo || saleId || 'invoice').toString().replace(/[^\w.-]+/g, '_')}.pdf`
+    const directPdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?_=${Date.now()}`
     try {
       toast.loading('Preparing PDF…', { id: 'pdf-download-toast' })
-      const response = await salesAPI.getInvoicePdf(saleId)
-      const raw = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
-      const check = await validatePdfBlob(raw)
-      if (!check.ok) {
-        toast.dismiss('pdf-download-toast')
-        toast.error(check.message)
-        return
-      }
 
       if (isLikelyMobileBrowser()) {
-        const opened = tryOpenBlobInNewTab(check.blob)
+        const opened = window.open(directPdfUrl, '_blank')
         toast.dismiss('pdf-download-toast')
         if (opened) {
           toast.success(
@@ -442,12 +435,17 @@ const PosPage = () => {
           )
           return
         }
-        try {
-          triggerBlobDownload(check.blob, safeName)
-          toast.success('Download started — if nothing happens, allow downloads and try again')
-        } catch {
-          toast.error('Could not save the PDF on this device. Try Print Receipt or a desktop browser.')
-        }
+        window.location.href = directPdfUrl
+        toast.success('Opening invoice PDF in this tab...')
+        return
+      }
+
+      const response = await salesAPI.getInvoicePdf(saleId)
+      const raw = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
+      const check = await validatePdfBlob(raw)
+      if (!check.ok) {
+        toast.dismiss('pdf-download-toast')
+        toast.error(check.message)
         return
       }
 
@@ -476,112 +474,22 @@ const PosPage = () => {
       return
     }
 
-    const dismissPrintToast = () => toast.dismiss('print-toast')
+    const printUrl = `${API_BASE_URL}/sales/${saleId}/pdf?print=1&_=${Date.now()}`
 
-    // Open a tab synchronously (user gesture) so pop-up blockers and mobile Safari are less likely to block it.
-    let printWindow = null
-    try {
-      printWindow = window.open('', '_blank', 'noopener,noreferrer')
-      if (printWindow) {
-        printWindow.document.open()
-        printWindow.document.write(
-          '<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Invoice</title></head><body style="font-family:system-ui,sans-serif;padding:1.5rem;text-align:center;color:#444"><p>Preparing invoice PDF…</p></body></html>'
-        )
-        printWindow.document.close()
-      }
-    } catch (e) {
-      console.warn('Print placeholder window:', e)
+    // Use direct server URL instead of blob-printing, which is unstable on iPad/tablet browsers.
+    const printTab = window.open(printUrl, '_blank')
+    if (printTab) {
+      toast.success(
+        isIOSDevice()
+          ? 'PDF opened. Tap Share and choose Print.'
+          : 'Invoice opened. Use browser/PDF print option.'
+      )
+      return
     }
 
-    try {
-      toast.loading('Preparing invoice for printing…', { id: 'print-toast' })
-
-      const pdfBlob = await salesAPI.getInvoicePdf(saleId)
-      const raw = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
-      const check = await validatePdfBlob(raw)
-      if (!check.ok) {
-        dismissPrintToast()
-        if (printWindow && !printWindow.closed) {
-          try { printWindow.close() } catch (_) { /* ignore */ }
-        }
-        toast.error(check.message)
-        return
-      }
-
-      const blob = check.blob
-      const pdfUrl = URL.createObjectURL(blob)
-      const revokeLater = () => {
-        setTimeout(() => {
-          try { URL.revokeObjectURL(pdfUrl) } catch (_) { /* ignore */ }
-        }, 60_000)
-      }
-
-      const runPrintOnce = (targetWindow) => {
-        dismissPrintToast()
-        if (!targetWindow || targetWindow.closed) {
-          try { URL.revokeObjectURL(pdfUrl) } catch (_) { /* ignore */ }
-          return
-        }
-        try {
-          targetWindow.focus()
-          targetWindow.print()
-          toast.success(
-            isIOSDevice()
-              ? 'If no print sheet appears, use Share → Print on the PDF tab'
-              : 'Use the print dialog, or the PDF viewer’s print option if the page looks blank'
-          )
-        } catch (printErr) {
-          console.error('Print trigger error:', printErr)
-          toast('PDF is open — use the browser menu to print (⋯ or Share)', { icon: 'ℹ️', duration: 6000 })
-        }
-        revokeLater()
-      }
-
-      const assignPdfAndSchedulePrint = (targetWindow) => {
-        if (!targetWindow || targetWindow.closed) return false
-        targetWindow.location.href = pdfUrl
-        const delayMs = isLikelyMobileBrowser() ? 1200 : 700
-        setTimeout(() => runPrintOnce(targetWindow), delayMs)
-        return true
-      }
-
-      if (assignPdfAndSchedulePrint(printWindow)) {
-        return
-      }
-
-      const w = window.open(pdfUrl, '_blank', 'noopener,noreferrer')
-      if (!w) {
-        dismissPrintToast()
-        try { URL.revokeObjectURL(pdfUrl) } catch (_) { /* ignore */ }
-        if (tryOpenBlobInNewTab(blob)) {
-          toast.success('PDF opened — use Print or Share from that tab')
-          return
-        }
-        try {
-          triggerBlobDownload(blob, `INV-${(invoiceNo || saleId).toString().replace(/[^\w.-]+/g, '_')}.pdf`)
-          toast.success('PDF downloaded — open the file and print from your PDF app')
-        } catch {
-          toast.error('Pop-ups blocked. Allow pop-ups for this site, then tap Print Receipt again.')
-        }
-        return
-      }
-
-      assignPdfAndSchedulePrint(w)
-    } catch (error) {
-      dismissPrintToast()
-      if (printWindow && !printWindow.closed) {
-        try { printWindow.close() } catch (_) { /* ignore */ }
-      }
-      console.error('Print error:', error)
-      const errorMessage = await parseApiErrorBlobMessage(error, 'Failed to prepare invoice for printing')
-      toast.error(errorMessage)
-
-      try {
-        await handleDownloadPdf(saleId, invoiceNo)
-      } catch (downloadErr) {
-        console.error('Download fallback also failed:', downloadErr)
-      }
-    }
+    // Fallback when pop-up is blocked.
+    window.location.href = printUrl
+    toast('Pop-up blocked. Opened invoice in current tab for printing.', { icon: 'ℹ️', duration: 5000 })
   }
 
   const handleWhatsAppShare = async () => {

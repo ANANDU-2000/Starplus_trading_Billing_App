@@ -13,24 +13,25 @@ const PrintOptionsModal = ({ saleId, invoiceNo, onClose, onPrint }) => {
   const handlePrint = async () => {
     try {
       if (format === 'A4') {
-        // Open PDF in new window for browser print dialog
-        const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf`
+        // Direct server PDF URL is more reliable on tablets than blob/scripted print.
+        const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?print=1&_=${Date.now()}`
         const printWindow = window.open(pdfUrl, '_blank')
         if (printWindow) {
-          printWindow.onload = () => {
-            setTimeout(() => {
-              printWindow.print()
-            }, 250)
-          }
-          toast.success('Opening invoice in a new tab — use the print dialog there (Ctrl+P if needed)')
+          toast.success('Invoice opened. Use browser/PDF print options in that tab.')
         } else {
-          toast.error('Please allow pop-ups for this site to print')
+          window.location.href = pdfUrl
+          toast('Pop-up blocked. Opened invoice in current tab for printing.', { icon: 'ℹ️', duration: 5000 })
         }
       } else {
         // Thermal printer - download or open PDF
-        const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?format=thermal&width=${format === 'thermal58' ? '58' : '80'}`
-        window.open(pdfUrl, '_blank')
-        toast.success('Opening thermal PDF in a new tab')
+        const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?format=thermal&width=${format === 'thermal58' ? '58' : '80'}&_=${Date.now()}`
+        const thermalWindow = window.open(pdfUrl, '_blank')
+        if (thermalWindow) {
+          toast.success('Thermal invoice opened in new tab')
+        } else {
+          window.location.href = pdfUrl
+          toast('Pop-up blocked. Opened thermal invoice in current tab.', { icon: 'ℹ️', duration: 5000 })
+        }
       }
       
       if (onPrint) onPrint()

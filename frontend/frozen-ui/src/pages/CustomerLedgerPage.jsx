@@ -40,6 +40,8 @@ import PaymentModal from '../components/PaymentModal'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
 import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -1872,10 +1874,12 @@ const CustomerLedgerPage = () => {
                       }}
                       onViewPDF={async (invoiceId) => {
                         try {
-                          const pdfBlob = await salesAPI.getInvoicePdf(invoiceId)
-                          const url = window.URL.createObjectURL(pdfBlob)
-                          window.open(url, '_blank')
-                          setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+                          const pdfUrl = `${API_BASE_URL}/sales/${invoiceId}/pdf?_=${Date.now()}`
+                          const popup = window.open(pdfUrl, '_blank')
+                          if (!popup) {
+                            window.location.href = pdfUrl
+                            toast('Pop-up blocked. Opened invoice in current tab.', { icon: 'ℹ️', duration: 4000 })
+                          }
                         } catch (error) {
                           toast.error(error?.message || 'Failed to generate PDF')
                         }
@@ -2085,15 +2089,12 @@ const CustomerLedgerPage = () => {
           }}
           onPrint={async () => {
             try {
-              const pdfBlob = await salesAPI.getInvoicePdf(selectedInvoiceForView)
-              const url = window.URL.createObjectURL(pdfBlob)
-              const printWindow = window.open(url, '_blank')
-              if (printWindow) {
-                printWindow.onload = () => {
-                  printWindow.print()
-                }
+              const printUrl = `${API_BASE_URL}/sales/${selectedInvoiceForView}/pdf?print=1&_=${Date.now()}`
+              const printWindow = window.open(printUrl, '_blank')
+              if (!printWindow) {
+                window.location.href = printUrl
+                toast('Pop-up blocked. Opened invoice in current tab for printing.', { icon: 'ℹ️', duration: 5000 })
               }
-              setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
             } catch (error) {
               toast.error(error?.message || 'Failed to print invoice')
             }
