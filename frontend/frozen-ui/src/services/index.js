@@ -115,8 +115,12 @@ export const salesAPI = {
 
   getInvoicePdf: async (id) => {
     try {
-      const response = await api.get(`/sales/${id}/pdf`, { 
-        responseType: 'blob'
+      const response = await api.get(`/sales/${id}/pdf`, {
+        responseType: 'blob',
+        timeout: 120000,
+        headers: {
+          Accept: 'application/pdf'
+        }
       })
       
       // Check content type from response headers
