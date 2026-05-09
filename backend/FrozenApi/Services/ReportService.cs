@@ -138,11 +138,13 @@ namespace FrozenApi.Services
                 {
                     // Load data first, then order in memory to avoid SQLite decimal ORDER BY issues
                     var products = await _context.Products
-                        .Where(p => p.StockQty <= p.ReorderLevel)
+                        .Where(p => p.IsActive && p.StockQty <= p.ReorderLevel)
                         .Select(p => new ProductDto
                         {
                             Id = p.Id,
                             Sku = p.Sku,
+                            Barcode = p.Barcode,
+                            IsActive = p.IsActive,
                             NameEn = p.NameEn,
                             NameAr = p.NameAr,
                             UnitType = p.UnitType,
@@ -568,6 +570,8 @@ namespace FrozenApi.Services
                         {
                             Id = g.Key.ProductId,
                             Sku = g.Key.ProductSku,
+                            Barcode = null,
+                            IsActive = true,
                             NameEn = g.Key.ProductName,
                             UnitType = g.Key.UnitType,
                             ConversionToBase = 1,
@@ -589,13 +593,15 @@ namespace FrozenApi.Services
                 try
                 {
                     restockCandidates = await _context.Products
-                        .Where(p => p.StockQty <= p.ReorderLevel)
+                        .Where(p => p.IsActive && p.StockQty <= p.ReorderLevel)
                         .OrderBy(p => p.StockQty)
                         .Take(5)
                         .Select(p => new ProductDto
                         {
                             Id = p.Id,
                             Sku = p.Sku,
+                            Barcode = p.Barcode,
+                            IsActive = p.IsActive,
                             NameEn = p.NameEn,
                             NameAr = p.NameAr,
                             UnitType = p.UnitType,
@@ -620,11 +626,13 @@ namespace FrozenApi.Services
                 {
                     // Load data first, then order in memory to avoid SQLite decimal ORDER BY issues
                     var products = await _context.Products
-                        .Where(p => p.SellPrice > 0 && (p.SellPrice - p.CostPrice) / p.SellPrice < 0.2m)
+                        .Where(p => p.IsActive && p.SellPrice > 0 && (p.SellPrice - p.CostPrice) / p.SellPrice < 0.2m)
                         .Select(p => new ProductDto
                         {
                             Id = p.Id,
                             Sku = p.Sku,
+                            Barcode = p.Barcode,
+                            IsActive = p.IsActive,
                             NameEn = p.NameEn,
                             NameAr = p.NameAr,
                             UnitType = p.UnitType,
@@ -678,13 +686,15 @@ namespace FrozenApi.Services
                 try
                 {
                     promotionCandidates = await _context.Products
-                        .Where(p => p.SellPrice > 0 && (p.SellPrice - p.CostPrice) / p.SellPrice > 0.3m && p.StockQty <= p.ReorderLevel * 2)
+                        .Where(p => p.IsActive && p.SellPrice > 0 && (p.SellPrice - p.CostPrice) / p.SellPrice > 0.3m && p.StockQty <= p.ReorderLevel * 2)
                         .OrderByDescending(p => p.SellPrice > 0 ? (p.SellPrice - p.CostPrice) / p.SellPrice : 0)
                         .Take(5)
                         .Select(p => new ProductDto
                         {
                             Id = p.Id,
                             Sku = p.Sku,
+                            Barcode = p.Barcode,
+                            IsActive = p.IsActive,
                             NameEn = p.NameEn,
                             NameAr = p.NameAr,
                             UnitType = p.UnitType,

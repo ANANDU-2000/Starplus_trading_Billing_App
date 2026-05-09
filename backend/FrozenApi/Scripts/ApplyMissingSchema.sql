@@ -87,10 +87,27 @@ UPDATE "ExpenseCategories" SET "DefaultVatRate" = 0.05, "DefaultIsEntertainment"
 UPDATE "ExpenseCategories" SET "DefaultVatRate" = 0.05, "DefaultTaxType" = 'Standard', "DefaultIsTaxClaimable" = true WHERE "Id" = 8;
 UPDATE "ExpenseCategories" SET "DefaultTaxType" = 'Exempt', "DefaultIsTaxClaimable" = false WHERE "Id" = 9;
 
--- 7. Record migrations in EF history so future app Migrate() does not re-apply (idempotent)
+-- 7. Products: Barcode + IsActive (normalized POS search, soft delete)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Products' AND column_name = 'Barcode') THEN
+    ALTER TABLE "Products" ADD COLUMN "Barcode" character varying(64) NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'Products' AND column_name = 'IsActive') THEN
+    ALTER TABLE "Products" ADD COLUMN "IsActive" boolean NOT NULL DEFAULT true;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "IX_Products_IsActive_NameEn" ON "Products" ("IsActive", "NameEn");
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_Products_Barcode_Unique_NonEmpty"
+  ON "Products" ("Barcode")
+  WHERE "Barcode" IS NOT NULL AND BTRIM("Barcode") <> '';
+
+-- 8. Record migrations in EF history so future app Migrate() does not re-apply (idempotent)
 INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
 VALUES
   ('20260310120000_AddRoundOffToSales', '9.0.0'),
   ('20260310130000_AddPaymentReceipts', '9.0.0'),
-  ('20260310140000_AddVatDefaultsToExpenseCategories', '9.0.0')
+  ('20260310140000_AddVatDefaultsToExpenseCategories', '9.0.0'),
+  ('20260509120000_AddProductBarcodeIsActiveSearch', '9.0.0')
 ON CONFLICT ("MigrationId") DO NOTHING;

@@ -642,7 +642,6 @@ const ReportsPage = () => {
     } else if (tabFromUrl && tabs.find(t => t.id === tabFromUrl) && activeTab !== tabFromUrl) {
       setActiveTab(tabFromUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
 
   // Listen for global data update events for instant refresh (with debouncing)
@@ -679,7 +678,6 @@ const ReportsPage = () => {
       window.removeEventListener('paymentCreated', handleDataUpdate)
       window.removeEventListener('customerCreated', handleDataUpdate)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only set up listeners once, use ref for fetchReportData
 
   // Load products and customers for filters
@@ -724,7 +722,6 @@ const ReportsPage = () => {
         initialLoadTimeoutRef.current = null
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
 
   // Handle dependency-based refreshes (dateRange, activeTab, filters change)
@@ -764,7 +761,6 @@ const ReportsPage = () => {
         fetchTimeoutRef.current = null
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange, activeTab, filters]) // Only refresh when these change
 
   // Auto-refresh interval (separate useEffect) - DISABLED to prevent 429 errors
@@ -772,7 +768,6 @@ const ReportsPage = () => {
     // DISABLED: Auto-refresh causes too many requests
     // Users can manually refresh if needed
     return () => {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Empty deps - never runs
 
   const handleExport = async (format) => {

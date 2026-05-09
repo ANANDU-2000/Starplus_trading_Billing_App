@@ -137,6 +137,7 @@ builder.Services.AddSecurityServices(builder.Configuration);
 // Services
 builder.Services.AddSingleton<IFontService, FontService>(); // Singleton for font registration
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IInventoryLedgerService, InventoryLedgerService>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IExcelImportService, ExcelImportService>();
 builder.Services.AddScoped<IInvoiceTemplateService, InvoiceTemplateService>();

@@ -71,6 +71,9 @@ namespace FrozenApi.Data
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Sku).IsRequired().HasMaxLength(50);
                 entity.HasIndex(e => e.Sku).IsUnique();
+                entity.Property(e => e.Barcode).HasMaxLength(64);
+                entity.Property(e => e.IsActive).HasDefaultValue(true);
+                entity.HasIndex(e => new { e.IsActive, e.NameEn });
                 entity.Property(e => e.UnitType).IsRequired().HasMaxLength(20);
                 entity.Property(e => e.CostPrice).HasColumnType("decimal(18,2)");
                 entity.Property(e => e.SellPrice).HasColumnType("decimal(18,2)");

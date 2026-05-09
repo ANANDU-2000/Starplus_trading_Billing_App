@@ -18,10 +18,12 @@ namespace FrozenApi.Services
     public class StockAdjustmentService : IStockAdjustmentService
     {
         private readonly AppDbContext _context;
+        private readonly IInventoryLedgerService _inventoryLedger;
 
-        public StockAdjustmentService(AppDbContext context)
+        public StockAdjustmentService(AppDbContext context, IInventoryLedgerService inventoryLedger)
         {
             _context = context;
+            _inventoryLedger = inventoryLedger;
         }
 
         public async Task<StockAdjustmentDto> CreateAdjustmentAsync(CreateStockAdjustmentRequest request, int userId)
@@ -29,7 +31,7 @@ namespace FrozenApi.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                var product = await _context.Products.FindAsync(request.ProductId);
+                var product = await _inventoryLedger.LoadProductForStockUpdateAsync(request.ProductId);
                 if (product == null)
                     throw new InvalidOperationException("Product not found");
 

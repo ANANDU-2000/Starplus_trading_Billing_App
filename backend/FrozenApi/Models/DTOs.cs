@@ -99,6 +99,8 @@ namespace FrozenApi.Models
     {
         public int Id { get; set; }
         public string Sku { get; set; } = string.Empty;
+        public string? Barcode { get; set; }
+        public bool IsActive { get; set; } = true;
         public string NameEn { get; set; } = string.Empty;
         public string? NameAr { get; set; }
         public string UnitType { get; set; } = string.Empty;
@@ -112,10 +114,18 @@ namespace FrozenApi.Models
         public string? DescriptionAr { get; set; }
     }
 
+    /// <summary>Grouped duplicate-name candidates for admin merge workflows.</summary>
+    public class DuplicateProductGroupDto
+    {
+        public string NormalizedName { get; set; } = string.Empty;
+        public List<ProductDto> Products { get; set; } = new();
+    }
+
     public class CreateProductRequest
     {
         [Required]
         public string Sku { get; set; } = string.Empty;
+        public string? Barcode { get; set; }
         [Required]
         public string NameEn { get; set; } = string.Empty;
         public string? NameAr { get; set; }

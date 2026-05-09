@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 const ProductForm = ({ product, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
     sku: product?.sku || '',
+    barcode: product?.barcode || '',
     nameEn: product?.nameEn || '',
     nameAr: product?.nameAr || '',
     unitType: product?.unitType || 'CRTN',
@@ -57,6 +58,20 @@ const ProductForm = ({ product, onSave, onCancel }) => {
                 className="input"
                 value={formData.sku}
                 onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Barcode / scan code
+              </label>
+              <input
+                type="text"
+                name="barcode"
+                className="input"
+                value={formData.barcode}
+                onChange={handleChange}
+                placeholder="Optional — same as SKU if blank"
               />
             </div>
 

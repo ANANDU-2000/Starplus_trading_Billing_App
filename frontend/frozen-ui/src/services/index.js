@@ -48,6 +48,11 @@ export const productsAPI = {
     return response.data
   },
 
+  reactivateProduct: async (id) => {
+    const response = await api.post(`/products/${id}/reactivate`)
+    return response.data
+  },
+
   adjustStock: async (id, adjustment) => {
     const response = await api.post(`/products/${id}/adjust-stock`, adjustment)
     return response.data

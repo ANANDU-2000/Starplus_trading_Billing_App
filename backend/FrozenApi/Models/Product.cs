@@ -29,6 +29,11 @@ namespace FrozenApi.Models
         public DateTime? ExpiryDate { get; set; } // Track product expiry date
         public string? DescriptionEn { get; set; }
         public string? DescriptionAr { get; set; }
+        /// <summary>Optional scan code (may match SKU or be distinct).</summary>
+        [MaxLength(64)]
+        public string? Barcode { get; set; }
+        /// <summary>Inactive products are hidden from POS/search but kept for invoice history.</summary>
+        public bool IsActive { get; set; } = true;
         public byte[] RowVersion { get; set; } = Array.Empty<byte>();
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Edit, Trash2, Package, AlertTriangle, Search, Filter, RefreshCw, Download, Upload, MoreVertical } from 'lucide-react'
+import { Plus, Edit, Trash2, Package, AlertTriangle, Search, Filter, RefreshCw, Download, Upload, MoreVertical, RotateCcw } from 'lucide-react'
 import { productsAPI } from '../services'
+import { useAuth } from '../hooks/useAuth'
 import ProductForm from '../components/ProductForm'
 import StockAdjustmentModal from '../components/StockAdjustmentModal'
 import DeleteConfirmModal from '../components/DeleteConfirmModal'
@@ -8,6 +9,9 @@ import { TabNavigation, FilterPanel, ModernTable } from '../components/ui'
 import toast from 'react-hot-toast'
 
 const ProductsPage = () => {
+  const { user } = useAuth()
+  const isAdmin = (user?.role || '').toLowerCase() === 'admin'
+
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -26,6 +30,7 @@ const ProductsPage = () => {
   const [importFile, setImportFile] = useState(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [showInactive, setShowInactive] = useState(false)
 
   const loadProducts = useCallback(async () => {
     try {
@@ -35,7 +40,8 @@ const ProductsPage = () => {
         pageSize: 10,
         search: searchTerm || undefined,
         lowStock: activeTab === 'lowStock',
-        unitType: activeFilters.unitType || undefined
+        unitType: activeFilters.unitType || undefined,
+        includeInactive: isAdmin && showInactive
       }
       
       const response = await productsAPI.getProducts(params)
@@ -58,7 +64,11 @@ const ProductsPage = () => {
     } finally {
       setLoading(false)
     }
-  }, [currentPage, searchTerm, activeTab, activeFilters])
+  }, [currentPage, searchTerm, activeTab, activeFilters, showInactive, isAdmin])
+
+  useEffect(() => {
+    if (!isAdmin && showInactive) setShowInactive(false)
+  }, [isAdmin, showInactive])
 
   useEffect(() => {
     loadProducts()
@@ -72,7 +82,7 @@ const ProductsPage = () => {
     
     return () => clearInterval(refreshInterval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, searchTerm, activeTab, activeFilters]) // Only refresh when filters change
+  }, [currentPage, searchTerm, activeTab, activeFilters, showInactive, isAdmin]) // Only refresh when filters change
 
   const handleCreateProduct = async (productData) => {
     // Prevent multiple clicks
@@ -190,17 +200,35 @@ const ProductsPage = () => {
     try {
       const response = await productsAPI.deleteProduct(productToDelete.id)
       if (response?.success) {
-        toast.success('Product deleted successfully')
+        toast.success('Product deactivated (hidden from POS)')
         loadProducts()
       } else {
-        toast.error(response?.message || 'Failed to delete product')
+        toast.error(response?.message || 'Failed to deactivate product')
       }
     } catch (error) {
       console.error('Error deleting product:', error)
-      toast.error(error?.response?.data?.message || 'Failed to delete product')
+      toast.error(error?.response?.data?.message || 'Failed to deactivate product')
     } finally {
       setShowDeleteModal(false)
       setProductToDelete(null)
+    }
+  }
+
+  const handleReactivateProduct = async (product) => {
+    if (!product?.id) return
+    try {
+      setLoading(true)
+      const response = await productsAPI.reactivateProduct(product.id)
+      if (response?.success) {
+        toast.success('Product reactivated')
+        loadProducts()
+      } else {
+        toast.error(response?.message || 'Failed to reactivate')
+      }
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to reactivate product')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -381,6 +409,23 @@ const ProductsPage = () => {
         onFilterChange={setActiveFilters}
       />
 
+      {isAdmin && (
+        <div className="mb-3 flex items-center gap-2 px-1">
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => {
+                setShowInactive(e.target.checked)
+                setCurrentPage(1)
+              }}
+              className="rounded border-gray-300 h-5 w-5"
+            />
+            Show inactive (deactivated) products
+          </label>
+        </div>
+      )}
+
       {/* Modern Products Table */}
       <ModernTable
         data={products}
@@ -388,6 +433,19 @@ const ProductsPage = () => {
         columns={[
           { key: 'sku', label: 'SKU', sortable: true },
           { key: 'nameEn', label: 'Name (EN)', sortable: true },
+          ...(isAdmin
+            ? [{
+                key: 'isActive',
+                label: 'Status',
+                sortable: true,
+                render: (p) =>
+                  p.isActive === false ? (
+                    <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">Inactive</span>
+                  ) : (
+                    <span className="text-xs text-gray-500">Active</span>
+                  )
+              }]
+            : []),
           { key: 'unitType', label: 'Qty', sortable: true },
           { 
             key: 'stockQty', 
@@ -426,41 +484,60 @@ const ProductsPage = () => {
           }
         ]}
         actions={(product) => (
-          <div className="flex space-x-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setEditingProduct(product)
-                setShowForm(true)
-              }}
-              className="bg-blue-50 text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
-              title="Edit Product"
-            >
-              <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              <span className="hidden sm:inline text-xs font-medium">Edit</span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleStockAdjustment(product)
-              }}
-              className="bg-green-50 text-green-600 hover:text-white hover:bg-green-600 border border-green-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
-              title="Adjust Stock"
-            >
-              <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              <span className="hidden sm:inline text-xs font-medium">Stock</span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleDeleteClick(product)
-              }}
-              className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
-              title="Delete Product"
-            >
-              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              <span className="hidden sm:inline text-xs font-medium">Delete</span>
-            </button>
+          <div className="flex flex-wrap gap-2">
+            {product.isActive === false && isAdmin ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleReactivateProduct(product)
+                }}
+                className="bg-emerald-50 text-emerald-700 hover:text-white hover:bg-emerald-600 border border-emerald-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
+                title="Reactivate product"
+              >
+                <RotateCcw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline text-xs font-medium">Reactivate</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditingProduct(product)
+                    setShowForm(true)
+                  }}
+                  className="bg-blue-50 text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
+                  title="Edit Product"
+                >
+                  <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline text-xs font-medium">Edit</span>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleStockAdjustment(product)
+                  }}
+                  className="bg-green-50 text-green-600 hover:text-white hover:bg-green-600 border border-green-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
+                  title="Adjust Stock"
+                >
+                  <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline text-xs font-medium">Stock</span>
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteClick(product)
+                    }}
+                    className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 p-1.5 sm:p-2 rounded transition-colors shadow-sm flex items-center gap-1"
+                    title="Deactivate product"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline text-xs font-medium">Deactivate</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )}
       />
@@ -710,8 +787,8 @@ const ProductsPage = () => {
           setProductToDelete(null)
         }}
         onConfirm={handleDeleteProduct}
-        title="Delete Product"
-        message="This will permanently delete this product. This action cannot be undone."
+        title="Deactivate product"
+        message="This will hide the product from POS and new sales. Existing invoices stay intact. You can reactivate it later from the inactive list."
         itemName={productToDelete?.nameEn || productToDelete?.sku}
       />
     </div>

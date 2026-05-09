@@ -201,6 +201,7 @@ namespace FrozenApi.Services
                             StockQty = 0, // CRITICAL: Stock is computed from transactions only
                             ReorderLevel = 0, // Deprecated
                             DescriptionEn = productData.Description,
+                            IsActive = true,
                             CreatedAt = DateTime.UtcNow,
                             UpdatedAt = DateTime.UtcNow
                         };

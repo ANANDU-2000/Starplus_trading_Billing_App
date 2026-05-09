@@ -699,6 +699,15 @@ namespace FrozenApi.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<decimal>("ConversionToBase")
                         .HasColumnType("decimal(18,2)");
 
@@ -760,6 +769,8 @@ namespace FrozenApi.Migrations
                     b.HasIndex("Sku")
                         .IsUnique();
 
+                    b.HasIndex("IsActive", "NameEn");
+
                     b.ToTable("Products");
 
                     b.HasData(
@@ -775,6 +786,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 3,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 86.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-GRL-001",
                             StockQty = 7m,
                             UnitType = "CRTN",
@@ -792,6 +805,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 3,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 99.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-GRL-002",
                             StockQty = 5m,
                             UnitType = "CRTN",
@@ -809,6 +824,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 3,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 70.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-GRL-003",
                             StockQty = 1m,
                             UnitType = "CRTN",
@@ -826,6 +843,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 2,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 145.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-BREAST-001",
                             StockQty = 1m,
                             UnitType = "CRTN",
@@ -843,6 +862,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 3,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 33.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "VEG-TAP-001",
                             StockQty = 4m,
                             UnitType = "CRTN",
@@ -860,6 +881,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 1,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 275.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "BEEF-BOB-001",
                             StockQty = 1m,
                             UnitType = "CRTN",
@@ -877,6 +900,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 5,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 305.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "MEAT-VEAL-001",
                             StockQty = 15m,
                             UnitType = "CRTN",
@@ -894,6 +919,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 5,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 88.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "SEA-HAMOOR-001",
                             StockQty = 20m,
                             UnitType = "CRTN",
@@ -911,6 +938,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 10,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 98.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-1200GM-001",
                             StockQty = 30m,
                             UnitType = "CRTN",
@@ -928,6 +957,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 10,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 112.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-1300GM-001",
                             StockQty = 25m,
                             UnitType = "CRTN",
@@ -945,6 +976,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 5,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 179.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-BREAST-12KG",
                             StockQty = 12m,
                             UnitType = "CRTN",
@@ -962,6 +995,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 10,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 56.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "DAIRY-BUTTER-001",
                             StockQty = 40m,
                             UnitType = "CRTN",
@@ -979,6 +1014,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 5,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 140.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-BREAST-AROURA",
                             StockQty = 18m,
                             UnitType = "CRTN",
@@ -996,6 +1033,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 5,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 180.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "MEAT-MINCE-001",
                             StockQty = 15m,
                             UnitType = "CRTN",
@@ -1013,6 +1052,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 10,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 88.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "CHK-1000GM-001",
                             StockQty = 35m,
                             UnitType = "CRTN",
@@ -1030,6 +1071,8 @@ namespace FrozenApi.Migrations
                             ReorderLevel = 10,
                             RowVersion = new byte[] { 0 },
                             SellPrice = 103.00m,
+                            Barcode = (string)null,
+                            IsActive = true,
                             Sku = "FOOD-HOTDOG-001",
                             StockQty = 45m,
                             UnitType = "CRTN",

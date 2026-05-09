@@ -21,11 +21,13 @@ namespace FrozenApi.Services
     {
         private readonly AppDbContext _context;
         private readonly ICustomerService _customerService;
+        private readonly IInventoryLedgerService _inventoryLedger;
 
-        public ReturnService(AppDbContext context, ICustomerService customerService)
+        public ReturnService(AppDbContext context, ICustomerService customerService, IInventoryLedgerService inventoryLedger)
         {
             _context = context;
             _customerService = customerService;
+            _inventoryLedger = inventoryLedger;
         }
 
         public async Task<SaleReturnDto> CreateSaleReturnAsync(CreateSaleReturnRequest request, int userId)
@@ -57,7 +59,7 @@ namespace FrozenApi.Services
                     if (saleItem == null)
                         throw new InvalidOperationException($"Sale item {item.SaleItemId} not found");
 
-                    var product = await _context.Products.FindAsync(saleItem.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(saleItem.ProductId);
                     if (product == null)
                         throw new InvalidOperationException("Product not found");
 
@@ -197,7 +199,7 @@ namespace FrozenApi.Services
                     if (purchaseItem == null)
                         throw new InvalidOperationException($"Purchase item {item.PurchaseItemId} not found");
 
-                    var product = await _context.Products.FindAsync(purchaseItem.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(purchaseItem.ProductId);
                     if (product == null)
                         throw new InvalidOperationException("Product not found");
 

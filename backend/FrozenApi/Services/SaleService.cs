@@ -40,6 +40,7 @@ namespace FrozenApi.Services
         private readonly IAlertService _alertService;
         private readonly IBalanceService _balanceService;
         private readonly ITimeZoneService _timeZoneService;
+        private readonly IInventoryLedgerService _inventoryLedger;
 
         public SaleService(
             AppDbContext context, 
@@ -49,7 +50,8 @@ namespace FrozenApi.Services
             IValidationService validationService,
             IAlertService alertService,
             IBalanceService balanceService,
-            ITimeZoneService timeZoneService)
+            ITimeZoneService timeZoneService,
+            IInventoryLedgerService inventoryLedger)
         {
             _context = context;
             _pdfService = pdfService;
@@ -59,6 +61,7 @@ namespace FrozenApi.Services
             _alertService = alertService;
             _balanceService = balanceService;
             _timeZoneService = timeZoneService;
+            _inventoryLedger = inventoryLedger;
         }
 
         public async Task<PagedResponse<SaleDto>> GetSalesAsync(int page = 1, int pageSize = 10, string? search = null)
@@ -297,7 +300,10 @@ namespace FrozenApi.Services
                     if (existingSale != null)
                     {
                         Console.WriteLine($"⚠️ Duplicate external reference detected: {request.ExternalReference}. Returning existing sale ID: {existingSale.Id}");
-                        return await GetSaleByIdAsync(existingSale.Id);
+                        var existingDto = await GetSaleByIdAsync(existingSale.Id);
+                        if (existingDto == null)
+                            throw new InvalidOperationException("Existing sale could not be loaded.");
+                        return existingDto;
                     }
                 }
 
@@ -381,12 +387,13 @@ namespace FrozenApi.Services
 
                 foreach (var item in request.Items)
                 {
-                    // Get product (Note: SQLite doesn't support FOR UPDATE lock, but transactions provide isolation)
-                    var product = await _context.Products
-                        .FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
 
                     if (product == null)
                         throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
+
+                    if (!product.IsActive)
+                        throw new InvalidOperationException($"Product '{product.NameEn}' is inactive and cannot be sold.");
 
                     // Calculate base quantity
                     var baseQty = item.Qty * product.ConversionToBase;
@@ -731,9 +738,12 @@ namespace FrozenApi.Services
 
                 foreach (var item in request.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                     if (product == null)
                         throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
+
+                    if (!product.IsActive)
+                        throw new InvalidOperationException($"Product '{product.NameEn}' is inactive and cannot be sold.");
 
                     var baseQty = item.Qty * product.ConversionToBase;
                     // Calculate line totals: Total = qty × price, VAT = Total × 5%, Amount = Total + VAT
@@ -1079,24 +1089,30 @@ namespace FrozenApi.Services
                 var stockConflicts = new List<string>();
                 foreach (var item in request.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
-                    if (product == null)
+                    var productRow = await _context.Products.FindAsync(item.ProductId);
+                    if (productRow == null)
                     {
                         stockConflicts.Add($"Product ID {item.ProductId} not found");
                         continue;
                     }
 
-                    var baseQty = item.Qty * product.ConversionToBase;
+                    if (!productRow.IsActive)
+                    {
+                        stockConflicts.Add($"Product '{productRow.NameEn}' is inactive");
+                        continue;
+                    }
+
+                    var baseQty = item.Qty * productRow.ConversionToBase;
                     
                     // Calculate current available stock (after restoring old quantities)
                     var oldItem = saleForUpdate.Items?.FirstOrDefault(i => i != null && i.ProductId == item.ProductId);
-                    var oldBaseQty = (oldItem != null && product != null) ? oldItem.Qty * product.ConversionToBase : 0;
-                    var availableAfterRestore = product.StockQty + oldBaseQty;
+                    var oldBaseQty = oldItem != null ? oldItem.Qty * productRow.ConversionToBase : 0;
+                    var availableAfterRestore = productRow.StockQty + oldBaseQty;
 
                     if (availableAfterRestore < baseQty)
                     {
                         stockConflicts.Add(
-                            $"{product.NameEn}: Available: {availableAfterRestore}, Required: {baseQty}"
+                            $"{productRow.NameEn}: Available: {availableAfterRestore}, Required: {baseQty}"
                         );
                     }
                 }
@@ -1118,7 +1134,7 @@ namespace FrozenApi.Services
                     {
                         if (oldItem != null)
                         {
-                            var product = await _context.Products.FindAsync(oldItem.ProductId);
+                            var product = await _inventoryLedger.LoadProductForStockUpdateAsync(oldItem.ProductId);
                             if (product != null)
                             {
                                 // Restore stock
@@ -1167,9 +1183,12 @@ namespace FrozenApi.Services
                 // Note: Stock has already been restored from old items above
                 foreach (var item in request.Items)
                 {
-                    var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                     if (product == null)
                         throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
+
+                    if (!product.IsActive)
+                        throw new InvalidOperationException($"Product '{product.NameEn}' is inactive and cannot be sold.");
 
                     var baseQty = item.Qty * product.ConversionToBase;
 
@@ -1605,7 +1624,7 @@ namespace FrozenApi.Services
                 {
                     foreach (var item in sale.Items)
                     {
-                        var product = await _context.Products.FindAsync(item.ProductId);
+                        var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                         if (product != null)
                         {
                             var baseQty = item.Qty * product.ConversionToBase;
@@ -1784,7 +1803,7 @@ namespace FrozenApi.Services
                 Console.WriteLine($"✅ PDF Generation: Calling PdfService...");
                 var pdfBytes = await _pdfService.GenerateInvoicePdfAsync(saleDto);
                 
-                Console.WriteLine($"✅ PDF Generation: SUCCESS! Generated {pdfBytes?.Length ?? 0} bytes");
+                Console.WriteLine($"✅ PDF Generation: SUCCESS! Generated {pdfBytes.Length} bytes");
                 return pdfBytes;
             }
             catch (Exception ex)
@@ -1958,7 +1977,7 @@ namespace FrozenApi.Services
                 // Restore old items - reverse current stock changes first
                 foreach (var item in currentSale.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                     if (product != null)
                     {
                         var baseQty = item.Qty * product.ConversionToBase;

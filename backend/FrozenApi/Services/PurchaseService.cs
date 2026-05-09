@@ -22,10 +22,12 @@ namespace FrozenApi.Services
     public class PurchaseService : IPurchaseService
     {
         private readonly AppDbContext _context;
+        private readonly IInventoryLedgerService _inventoryLedger;
 
-        public PurchaseService(AppDbContext context)
+        public PurchaseService(AppDbContext context, IInventoryLedgerService inventoryLedger)
         {
             _context = context;
+            _inventoryLedger = inventoryLedger;
         }
 
         public async Task<PagedResponse<PurchaseDto>> GetPurchasesAsync(int page = 1, int pageSize = 10, DateTime? startDate = null, DateTime? endDate = null, string? supplierName = null, string? category = null)
@@ -193,7 +195,7 @@ namespace FrozenApi.Services
                 foreach (var item in request.Items)
                 {
                     // CRITICAL: Verify product exists before updating stock
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                     if (product == null)
                         throw new InvalidOperationException($"Product with ID {item.ProductId} not found. Please verify the product exists.");
 
@@ -353,7 +355,7 @@ namespace FrozenApi.Services
                 // Reverse old stock changes
                 foreach (var oldItem in purchase.Items)
                 {
-                    var product = await _context.Products.FindAsync(oldItem.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(oldItem.ProductId);
                     if (product != null)
                     {
                         var oldBaseQty = oldItem.Qty * product.ConversionToBase;
@@ -386,7 +388,7 @@ namespace FrozenApi.Services
                 // Add new items and update stock
                 foreach (var item in request.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                     if (product == null)
                         throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
 
@@ -486,7 +488,7 @@ namespace FrozenApi.Services
                 // CRITICAL: Reverse all stock changes before deleting
                 foreach (var item in purchase.Items)
                 {
-                    var product = await _context.Products.FindAsync(item.ProductId);
+                    var product = await _inventoryLedger.LoadProductForStockUpdateAsync(item.ProductId);
                     if (product != null)
                     {
                         // Calculate base quantity that was added during purchase

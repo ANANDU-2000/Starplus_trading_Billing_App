@@ -126,7 +126,10 @@ namespace FrozenApi.Services
                 }
             }
 
-            return await BuildReceiptDtoAsync(receipt.Id, false);
+            var built = await BuildReceiptDtoAsync(receipt.Id, false);
+            if (built == null)
+                throw new InvalidOperationException("Receipt was saved but could not be loaded for response.");
+            return built;
         }
 
         public async Task<PaymentReceiptDto?> GetReceiptByIdAsync(int receiptId)

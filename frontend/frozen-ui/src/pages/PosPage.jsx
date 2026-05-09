@@ -23,6 +23,7 @@ import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import { triggerBlobDownload, isIOSDevice, isLikelyMobileBrowser } from '../utils/blobDownload'
 import { validatePdfBlob, parseApiErrorBlobMessage } from '../utils/pdfBlob'
+import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
@@ -61,17 +62,45 @@ const PosPage = () => {
   
   const customerInputRef = useRef(null)
   const productSearchRefs = useRef({})
+  const productSearchTimers = useRef({})
+  const [rowSearchResults, setRowSearchResults] = useState({})
 
   // Define loadProducts before useEffect
   const loadProducts = useCallback(async () => {
     try {
-      const response = await productsAPI.getProducts({ pageSize: 200 })
+      const response = await productsAPI.getProducts({ pageSize: 150 })
       if (response.success) {
         setProducts(response.data.items || [])
       }
     } catch (error) {
       toast.error('Failed to load products')
     }
+  }, [])
+
+  const scheduleProductSearch = useCallback((rowIndex, rawTerm) => {
+    const key = String(rowIndex)
+    if (productSearchTimers.current[key]) {
+      clearTimeout(productSearchTimers.current[key])
+    }
+    const term = (rawTerm || '').trim()
+    if (!term) {
+      setRowSearchResults((prev) => {
+        const next = { ...prev }
+        delete next[rowIndex]
+        return next
+      })
+      return
+    }
+    productSearchTimers.current[key] = setTimeout(async () => {
+      try {
+        const res = await productsAPI.searchProducts(term, 100)
+        if (res.success && Array.isArray(res.data)) {
+          setRowSearchResults((prev) => ({ ...prev, [rowIndex]: res.data }))
+        }
+      } catch {
+        // silent — POS stays usable with local slice
+      }
+    }, 280)
   }, [])
 
   const loadCustomers = useCallback(async () => {
@@ -217,6 +246,7 @@ const PosPage = () => {
         setShowProductDropdown({})
         // Clear search terms when clicking outside
         setProductSearchTerms({})
+        setRowSearchResults({})
       }
     }
 
@@ -234,6 +264,8 @@ const PosPage = () => {
     
     return () => {
       clearInterval(refreshInterval)
+      Object.values(productSearchTimers.current).forEach((t) => clearTimeout(t))
+      productSearchTimers.current = {}
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
@@ -265,22 +297,26 @@ const PosPage = () => {
     customer.phone?.includes(customerSearchTerm)
   )
 
-  // Filter products based on search term for each row
+  // Filter products: server-backed when typing; local slice when empty (fast open)
   const getFilteredProducts = (rowIndex) => {
     const searchTerm = productSearchTerms[rowIndex] || ''
-    if (!searchTerm.trim()) {
-      // Show all products when no search (or first 50 for better performance)
-      return products.slice(0, 50)
+    const trimmed = searchTerm.trim()
+    if (!trimmed) {
+      return products.slice(0, 80)
     }
-    
-    const term = searchTerm.toLowerCase()
-    const filtered = products.filter(product => 
+
+    const remote = rowSearchResults[rowIndex]
+    if (remote && remote.length > 0) {
+      return remote.slice(0, 100)
+    }
+
+    const term = trimmed.toLowerCase()
+    const filtered = products.filter((product) =>
       product.nameEn?.toLowerCase().includes(term) ||
       product.nameAr?.toLowerCase().includes(term) ||
       product.sku?.toLowerCase().includes(term) ||
-      product.barcode?.toLowerCase().includes(term)
+      (product.barcode && product.barcode.toLowerCase().includes(term))
     )
-    // Show up to 50 results for better visibility
     return filtered.slice(0, 50)
   }
 
@@ -400,22 +436,33 @@ const PosPage = () => {
       const rowTotal = qty * unitPrice
       return sum + rowTotal
     }, 0)
-    
+
     const vatTotal = cart.reduce((sum, item) => sum + (item.vatAmount || 0), 0)
-    const discountValue = typeof discount === 'number' ? discount : 0
-    const roundOffValue = typeof roundOff === 'number' ? roundOff : 0
-    const grandTotal = subtotal + vatTotal - discountValue + roundOffValue
-    
+    const { grandTotal } = computeInvoiceTotals({
+      subtotal,
+      vatTotal,
+      discount,
+      roundOff
+    })
+
     return { subtotal, vatTotal, grandTotal }
   }
 
   const autoRoundOff = () => {
-    const { subtotal, vatTotal } = calculateTotals()
-    const discountValue = typeof discount === 'number' ? discount : 0
-    const calcTotal = subtotal + vatTotal - discountValue
-    const rounded = Math.round(calcTotal)
-    const diff = rounded - calcTotal
-    if (Math.abs(diff) <= 1) setRoundOff(parseFloat(diff.toFixed(2)))
+    const subtotal = cart.reduce((sum, item) => {
+      const qty = typeof item.qty === 'number' ? item.qty : 0
+      const unitPrice = typeof item.unitPrice === 'number' ? item.unitPrice : 0
+      return sum + qty * unitPrice
+    }, 0)
+    const vatTotal = cart.reduce((sum, item) => sum + (item.vatAmount || 0), 0)
+    const { calcBeforeRound } = computeInvoiceTotals({
+      subtotal,
+      vatTotal,
+      discount,
+      roundOff: 0
+    })
+    const ro = computeAutoRoundOffFromCalc(calcBeforeRound)
+    if (ro !== 0) setRoundOff(ro)
   }
 
   const handleDownloadPdf = async (saleId, invoiceNo) => {
@@ -1048,6 +1095,7 @@ const PosPage = () => {
                                   onChange={(e) => {
                                     const searchValue = e.target.value
                                     setProductSearchTerms(prev => ({ ...prev, [index]: searchValue }))
+                                    scheduleProductSearch(index, searchValue)
                                     // Auto-open dropdown when user starts typing
                                     if (searchValue.trim() && !showProductDropdown[index]) {
                                       setShowProductDropdown(prev => ({ ...prev, [index]: true }))
@@ -1263,13 +1311,14 @@ const PosPage = () => {
                             onChange={(e) => {
                               const searchValue = e.target.value
                               setProductSearchTerms(prev => ({ ...prev, [index]: searchValue }))
+                              scheduleProductSearch(index, searchValue)
                               if (searchValue.trim() && !showProductDropdown[index]) {
                                 setShowProductDropdown(prev => ({ ...prev, [index]: true }))
                               }
                             }}
                             onFocus={() => setShowProductDropdown(prev => ({ ...prev, [index]: true }))}
                             onClick={(e) => e.stopPropagation()}
-                            placeholder="🔍 Search product name or code..."
+                            placeholder="Search product name or code..."
                             className="w-full px-3 py-2.5 border-2 border-blue-400 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                           />
                           {showProductDropdown[index] && (
@@ -1425,7 +1474,7 @@ const PosPage = () => {
         </div>
 
         {/* Bottom - Totals, Discount & Payment - SCROLLABLE MOBILE VERSION */}
-        <div className="bg-white border-t-2 border-gray-300 p-2 flex-shrink-0 shadow-md md:static">
+        <div className="bg-white border-t-2 border-gray-300 p-2 flex-shrink-0 shadow-md sticky bottom-0 z-30 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:static md:z-auto md:pb-2">
           {/* MOBILE: Scrollable Column Layout - Step by Step */}
           <div className="md:hidden space-y-3 max-h-[calc(100vh-400px)] overflow-y-auto pb-4">
             {/* Section 1: Totals Summary - Collapsible Style */}

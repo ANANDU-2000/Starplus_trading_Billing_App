@@ -31,11 +31,15 @@ namespace FrozenApi.Controllers
             [FromQuery] int pageSize = 10,
             [FromQuery] string? search = null,
             [FromQuery] bool lowStock = false,
-            [FromQuery] string? unitType = null)
+            [FromQuery] string? unitType = null,
+            [FromQuery] bool includeInactive = false)
         {
             try
             {
-                var result = await _productService.GetProductsAsync(page, pageSize, search, lowStock, unitType);
+                var canIncludeInactive = User?.Identity?.IsAuthenticated == true && User.IsInRole("Admin");
+                var effectiveIncludeInactive = includeInactive && canIncludeInactive;
+
+                var result = await _productService.GetProductsAsync(page, pageSize, search, lowStock, unitType, effectiveIncludeInactive);
                 return Ok(new ApiResponse<PagedResponse<ProductDto>>
                 {
                     Success = true,
@@ -46,6 +50,33 @@ namespace FrozenApi.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, new ApiResponse<PagedResponse<ProductDto>>
+                {
+                    Success = false,
+                    Message = "An error occurred",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
+        /// <summary>Admin: products sharing the same normalized English name (merge candidates).</summary>
+        [HttpGet("duplicate-name-groups")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<ApiResponse<List<DuplicateProductGroupDto>>>> GetDuplicateNameGroups(
+            [FromQuery] int maxGroups = 50)
+        {
+            try
+            {
+                var result = await _productService.GetDuplicateProductNameGroupsAsync(maxGroups);
+                return Ok(new ApiResponse<List<DuplicateProductGroupDto>>
+                {
+                    Success = true,
+                    Message = "Duplicate groups retrieved",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<List<DuplicateProductGroupDto>>
                 {
                     Success = false,
                     Message = "An error occurred",
@@ -217,6 +248,40 @@ namespace FrozenApi.Controllers
             }
         }
 
+        [HttpPost("{id}/reactivate")]
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult<ApiResponse<ProductDto>>> ReactivateProduct(int id)
+        {
+            try
+            {
+                var result = await _productService.ReactivateProductAsync(id);
+                if (result == null)
+                {
+                    return NotFound(new ApiResponse<ProductDto>
+                    {
+                        Success = false,
+                        Message = "Product not found"
+                    });
+                }
+
+                return Ok(new ApiResponse<ProductDto>
+                {
+                    Success = true,
+                    Message = "Product reactivated successfully",
+                    Data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<ProductDto>
+                {
+                    Success = false,
+                    Message = "An error occurred",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpPost("{id}/adjust-stock")]
         [Authorize(Roles = "Admin")]
         public async Task<ActionResult<ApiResponse<object>>> AdjustStock(int id, [FromBody] StockAdjustmentRequest request)
@@ -288,21 +353,16 @@ namespace FrozenApi.Controllers
         [HttpGet("search")]
         [AllowAnonymous]
         public async Task<ActionResult<ApiResponse<List<ProductDto>>>> SearchProducts(
-            [FromQuery] string q,
-            [FromQuery] int limit = 20)
+            [FromQuery] string? q,
+            [FromQuery] int limit = 50,
+            [FromQuery] bool includeInactive = false)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(q))
-                {
-                    return BadRequest(new ApiResponse<List<ProductDto>>
-                    {
-                        Success = false,
-                        Message = "Search query is required"
-                    });
-                }
+                var canIncludeInactive = User?.Identity?.IsAuthenticated == true && User.IsInRole("Admin");
+                var effectiveIncludeInactive = includeInactive && canIncludeInactive;
 
-                var result = await _productService.SearchProductsAsync(q, limit);
+                var result = await _productService.SearchProductsAsync(q, limit, effectiveIncludeInactive);
                 return Ok(new ApiResponse<List<ProductDto>>
                 {
                     Success = true,

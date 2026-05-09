@@ -141,6 +141,12 @@ namespace FrozenApi.Services
                 return ValidationResult.Failure(errors);
             }
 
+            if (!product.IsActive)
+            {
+                errors.Add($"Product '{product.NameEn}' is inactive.");
+                return ValidationResult.Failure(errors);
+            }
+
             // Calculate base quantity
             var baseQty = quantity * product.ConversionToBase;
 
