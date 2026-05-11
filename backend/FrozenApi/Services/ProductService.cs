@@ -54,8 +54,11 @@ namespace FrozenApi.Services
             DescriptionAr = p.DescriptionAr
         };
 
-        private IQueryable<Product> BaseQuery(bool includeInactive) =>
-            includeInactive ? _context.Products : _context.Products.Where(p => p.IsActive);
+        private IQueryable<Product> BaseQuery(bool includeInactive)
+        {
+            var q = includeInactive ? _context.Products : _context.Products.Where(p => p.IsActive);
+            return q.AsNoTracking();
+        }
 
         private static IQueryable<Product> ApplyIlikeSearch(IQueryable<Product> query, string normalizedSearch)
         {
@@ -65,7 +68,9 @@ namespace FrozenApi.Services
                 EF.Functions.ILike(p.NameEn, pattern) ||
                 (p.NameAr != null && EF.Functions.ILike(p.NameAr, pattern)) ||
                 EF.Functions.ILike(p.Sku, pattern) ||
-                (p.Barcode != null && EF.Functions.ILike(p.Barcode, pattern)));
+                (p.Barcode != null && EF.Functions.ILike(p.Barcode, pattern)) ||
+                (p.DescriptionEn != null && EF.Functions.ILike(p.DescriptionEn, pattern)) ||
+                (p.DescriptionAr != null && EF.Functions.ILike(p.DescriptionAr, pattern)));
         }
 
         public async Task<PagedResponse<ProductDto>> GetProductsAsync(int page = 1, int pageSize = 10, string? search = null, bool lowStock = false, string? unitType = null, bool includeInactive = false)
@@ -409,7 +414,9 @@ namespace FrozenApi.Services
                         EF.Functions.ILike(p.NameEn, tp) ||
                         (p.NameAr != null && EF.Functions.ILike(p.NameAr, tp)) ||
                         EF.Functions.ILike(p.Sku, tp) ||
-                        (p.Barcode != null && EF.Functions.ILike(p.Barcode, tp)))
+                        (p.Barcode != null && EF.Functions.ILike(p.Barcode, tp)) ||
+                        (p.DescriptionEn != null && EF.Functions.ILike(p.DescriptionEn, tp)) ||
+                        (p.DescriptionAr != null && EF.Functions.ILike(p.DescriptionAr, tp)))
                     .OrderBy(p => p.NameEn).Take(limit)
                     .Select(p => new ProductDto
                     {

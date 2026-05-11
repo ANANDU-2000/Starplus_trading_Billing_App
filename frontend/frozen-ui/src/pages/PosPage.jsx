@@ -45,6 +45,7 @@ const PosPage = () => {
   const [discount, setDiscount] = useState(0)
   const [discountInput, setDiscountInput] = useState('')
   const [roundOff, setRoundOff] = useState(0)
+  const [roundOffInput, setRoundOffInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [showInvoiceOptionsModal, setShowInvoiceOptionsModal] = useState(false)
   const [lastCreatedInvoice, setLastCreatedInvoice] = useState(null)
@@ -68,7 +69,7 @@ const PosPage = () => {
   // Define loadProducts before useEffect
   const loadProducts = useCallback(async () => {
     try {
-      const response = await productsAPI.getProducts({ pageSize: 150 })
+      const response = await productsAPI.getProducts({ pageSize: 500 })
       if (response.success) {
         setProducts(response.data.items || [])
       }
@@ -93,7 +94,7 @@ const PosPage = () => {
     }
     productSearchTimers.current[key] = setTimeout(async () => {
       try {
-        const res = await productsAPI.searchProducts(term, 100)
+        const res = await productsAPI.searchProducts(term, 200)
         if (res.success && Array.isArray(res.data)) {
           setRowSearchResults((prev) => ({ ...prev, [rowIndex]: res.data }))
         }
@@ -176,7 +177,9 @@ const PosPage = () => {
         } else {
           setDiscountInput('')
         }
-        setRoundOff(typeof sale.roundOff === 'number' ? sale.roundOff : 0)
+        const ro = typeof sale.roundOff === 'number' ? sale.roundOff : 0
+        setRoundOff(ro)
+        setRoundOffInput(ro === 0 ? '' : String(ro))
         if (sale.notes) setNotes(sale.notes)
 
         // Load cart items from sale
@@ -307,7 +310,7 @@ const PosPage = () => {
 
     const remote = rowSearchResults[rowIndex]
     if (remote && remote.length > 0) {
-      return remote.slice(0, 100)
+      return remote.slice(0, 200)
     }
 
     const term = trimmed.toLowerCase()
@@ -315,7 +318,9 @@ const PosPage = () => {
       product.nameEn?.toLowerCase().includes(term) ||
       product.nameAr?.toLowerCase().includes(term) ||
       product.sku?.toLowerCase().includes(term) ||
-      (product.barcode && product.barcode.toLowerCase().includes(term))
+      (product.barcode && product.barcode.toLowerCase().includes(term)) ||
+      product.descriptionEn?.toLowerCase().includes(term) ||
+      product.descriptionAr?.toLowerCase().includes(term)
     )
     return filtered.slice(0, 50)
   }
@@ -462,7 +467,8 @@ const PosPage = () => {
       roundOff: 0
     })
     const ro = computeAutoRoundOffFromCalc(calcBeforeRound)
-    if (ro !== 0) setRoundOff(ro)
+    setRoundOff(ro)
+    setRoundOffInput(ro === 0 ? '' : String(ro))
   }
 
   const handleDownloadPdf = async (saleId, invoiceNo) => {
@@ -926,6 +932,7 @@ const PosPage = () => {
     setDiscount(0)
     setDiscountInput('')
     setRoundOff(0)
+    setRoundOffInput('')
     setProductSearchTerms({}) // Clear all search terms
     setIsEditMode(false)
     setEditingSaleId(null)
@@ -1140,7 +1147,9 @@ const PosPage = () => {
                                               p.nameEn?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                               p.nameAr?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                               p.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                              p.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
+                                              p.barcode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                              p.descriptionEn?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                              p.descriptionAr?.toLowerCase().includes(searchTerm.toLowerCase())
                                             ).length
                                           : products.length
                                         const showingCount = filtered.length
@@ -1169,11 +1178,20 @@ const PosPage = () => {
                                                   <p className="text-xs text-gray-600">AED {product.sellPrice.toFixed(2)}</p>
                                                 </div>
                                                   <div className="text-right ml-2 flex-shrink-0">
-                                                  <p className={`text-xs font-semibold ${product.stockQty <= (product.reorderLevel || 0) ? 'text-red-600' : 'text-green-600'}`}>
-                                                    Stock: {product.stockQty} {product.unitType || 'KG'}
-                                                  </p>
-                                                  {product.stockQty <= (product.reorderLevel || 0) && (
-                                                    <p className="text-xs text-red-500">Low Stock!</p>
+                                                  {product.stockQty <= 0 ? (
+                                                    <>
+                                                      <p className="text-xs font-semibold text-orange-600">Out of Stock</p>
+                                                      <p className="text-xs text-gray-600">Stock: {product.stockQty} {product.unitType || 'KG'}</p>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <p className={`text-xs font-semibold ${product.stockQty <= (product.reorderLevel || 0) ? 'text-red-600' : 'text-green-600'}`}>
+                                                        Stock: {product.stockQty} {product.unitType || 'KG'}
+                                                      </p>
+                                                      {product.stockQty <= (product.reorderLevel || 0) && (
+                                                        <p className="text-xs text-red-500">Low Stock!</p>
+                                                      )}
+                                                    </>
                                                   )}
                                                 </div>
                                               </div>
@@ -1356,11 +1374,17 @@ const PosPage = () => {
                                             <p className="font-semibold text-sm text-gray-900 truncate">{product.nameEn}</p>
                                             <p className="text-xs text-gray-600 mt-0.5">AED {product.sellPrice.toFixed(2)}</p>
                                           </div>
-                                          <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded ${
-                                            product.stockQty > (product.reorderLevel || 0) ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                          }`}>
-                                            Stock: {product.stockQty}
-                                          </span>
+                                          {product.stockQty <= 0 ? (
+                                            <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-orange-100 text-orange-800 whitespace-nowrap">
+                                              Out of Stock
+                                            </span>
+                                          ) : (
+                                            <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded ${
+                                              product.stockQty > (product.reorderLevel || 0) ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                            }`}>
+                                              Stock: {product.stockQty}
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     ))}
@@ -1503,19 +1527,37 @@ const PosPage = () => {
                   <div className="flex items-center gap-1">
                     <button type="button" onClick={autoRoundOff} className="text-xs text-blue-600 font-medium px-1.5 py-0.5 rounded border border-blue-300 bg-blue-50">Auto</button>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="-1"
-                      max="1"
+                      type="text"
+                      inputMode="decimal"
                       className="w-16 text-right border border-gray-300 rounded px-1.5 py-1 text-xs font-semibold"
-                      value={roundOff === 0 ? '' : roundOff}
+                      value={roundOffInput}
                       onChange={(e) => {
-                        const v = e.target.value
-                        if (v === '') { setRoundOff(0); return }
-                        const n = parseFloat(v)
-                        if (!isNaN(n) && n >= -1 && n <= 1) setRoundOff(n)
+                        const value = e.target.value
+                        if (value === '' || /^-?\d*\.?\d*$/.test(value)) {
+                          setRoundOffInput(value)
+                          if (value === '' || value === '-') {
+                            setRoundOff(0)
+                            return
+                          }
+                          const numValue = parseFloat(value)
+                          if (!isNaN(numValue) && numValue >= -1 && numValue <= 1) setRoundOff(numValue)
+                        }
                       }}
-                      placeholder="0"
+                      onBlur={() => {
+                        if (roundOffInput === '' || roundOffInput === '-' || roundOffInput === '-.') {
+                          setRoundOffInput('')
+                          setRoundOff(0)
+                          return
+                        }
+                        const numValue = parseFloat(roundOffInput)
+                        if (isNaN(numValue)) {
+                          setRoundOffInput(roundOff === 0 ? '' : String(roundOff))
+                          return
+                        }
+                        const clamped = Math.max(-1, Math.min(1, numValue))
+                        setRoundOff(clamped)
+                        setRoundOffInput(clamped === 0 ? '' : String(clamped))
+                      }}
                     />
                   </div>
                 </div>
@@ -1645,19 +1687,37 @@ const PosPage = () => {
                   <div className="flex items-center gap-1">
                     <button type="button" onClick={autoRoundOff} className="text-[10px] text-blue-600 font-medium px-1 py-0.5 rounded border border-blue-300 bg-blue-50 whitespace-nowrap">Auto</button>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="-1"
-                      max="1"
+                      type="text"
+                      inputMode="decimal"
                       className="w-14 text-right border border-gray-300 rounded px-1 py-0.5 text-xs"
-                      value={roundOff === 0 ? '' : roundOff}
+                      value={roundOffInput}
                       onChange={(e) => {
-                        const v = e.target.value
-                        if (v === '') { setRoundOff(0); return }
-                        const n = parseFloat(v)
-                        if (!isNaN(n) && n >= -1 && n <= 1) setRoundOff(n)
+                        const value = e.target.value
+                        if (value === '' || /^-?\d*\.?\d*$/.test(value)) {
+                          setRoundOffInput(value)
+                          if (value === '' || value === '-') {
+                            setRoundOff(0)
+                            return
+                          }
+                          const numValue = parseFloat(value)
+                          if (!isNaN(numValue) && numValue >= -1 && numValue <= 1) setRoundOff(numValue)
+                        }
                       }}
-                      placeholder="0"
+                      onBlur={() => {
+                        if (roundOffInput === '' || roundOffInput === '-' || roundOffInput === '-.') {
+                          setRoundOffInput('')
+                          setRoundOff(0)
+                          return
+                        }
+                        const numValue = parseFloat(roundOffInput)
+                        if (isNaN(numValue)) {
+                          setRoundOffInput(roundOff === 0 ? '' : String(roundOff))
+                          return
+                        }
+                        const clamped = Math.max(-1, Math.min(1, numValue))
+                        setRoundOff(clamped)
+                        setRoundOffInput(clamped === 0 ? '' : String(clamped))
+                      }}
                     />
                   </div>
                 </div>

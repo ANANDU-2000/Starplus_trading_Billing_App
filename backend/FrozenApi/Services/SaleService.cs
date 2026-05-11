@@ -406,7 +406,7 @@ namespace FrozenApi.Services
 
                     // Calculate line totals: Total = qty × price, VAT = Total × 5%, Amount = Total + VAT
                     var rowTotal = item.UnitPrice * item.Qty;
-                    var vatAmount = Math.Round(rowTotal * (vatPercent / 100), 2);
+                    var vatAmount = Math.Round(rowTotal * (vatPercent / 100), 2, MidpointRounding.AwayFromZero);
                     var lineAmount = rowTotal + vatAmount;
 
                     subtotal += rowTotal;
@@ -450,7 +450,7 @@ namespace FrozenApi.Services
                 var roundOff = request.RoundOff;
                 if (Math.Abs(roundOff) > 1.00m)
                     throw new InvalidOperationException("Round-off cannot exceed ±AED 1.00");
-                var finalTotal = Math.Round(calcTotal + roundOff, 2);
+                var finalTotal = Math.Round(calcTotal + roundOff, 2, MidpointRounding.AwayFromZero);
 
                 // Create sale
                 // CRITICAL: Stock is decremented in this transaction (lines 276-290)
@@ -748,7 +748,7 @@ namespace FrozenApi.Services
                     var baseQty = item.Qty * product.ConversionToBase;
                     // Calculate line totals: Total = qty × price, VAT = Total × 5%, Amount = Total + VAT
                     var rowTotal = item.UnitPrice * item.Qty;
-                    var vatAmount = Math.Round(rowTotal * (vatPercent / 100), 2);
+                    var vatAmount = Math.Round(rowTotal * (vatPercent / 100), 2, MidpointRounding.AwayFromZero);
                     var lineAmount = rowTotal + vatAmount;
 
                     subtotal += rowTotal;
@@ -789,7 +789,7 @@ namespace FrozenApi.Services
                 var roundOff = request.RoundOff;
                 if (Math.Abs(roundOff) > 1.00m)
                     throw new InvalidOperationException("Round-off cannot exceed ±AED 1.00");
-                var finalTotal = Math.Round(calcTotal + roundOff, 2);
+                var finalTotal = Math.Round(calcTotal + roundOff, 2, MidpointRounding.AwayFromZero);
 
                 // CASH CUSTOMER LOGIC: If no customer ID (cash customer), auto-mark as paid with cash payment
                 bool isCashCustomerOverride = !request.CustomerId.HasValue;
@@ -1211,7 +1211,7 @@ namespace FrozenApi.Services
                     }
 
                     var rowTotal = item.UnitPrice * item.Qty;
-                    var vatAmount = Math.Round(rowTotal * (vatPercent / 100), 2);
+                    var vatAmount = Math.Round(rowTotal * (vatPercent / 100), 2, MidpointRounding.AwayFromZero);
                     var lineAmount = rowTotal + vatAmount;
 
                     subtotal += rowTotal;
@@ -1252,7 +1252,7 @@ namespace FrozenApi.Services
                 var roundOff = request.RoundOff;
                 if (Math.Abs(roundOff) > 1.00m)
                     throw new InvalidOperationException("Round-off cannot exceed ±AED 1.00");
-                var grandTotal = Math.Round(calcTotal + roundOff, 2);
+                var grandTotal = Math.Round(calcTotal + roundOff, 2, MidpointRounding.AwayFromZero);
 
                 // Delete old sale items
                 if (saleForUpdate.Items != null && saleForUpdate.Items.Any())
@@ -1761,6 +1761,7 @@ namespace FrozenApi.Services
                 Console.WriteLine($"\n📄 PDF Generation: Starting for sale {saleId}");
                 
                 var sale = await _context.Sales
+                    .AsNoTracking()
                     .Include(s => s.Customer)
                     .Include(s => s.Items)
                         .ThenInclude(i => i.Product)

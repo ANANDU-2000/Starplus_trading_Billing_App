@@ -718,6 +718,24 @@ namespace FrozenApi.Services
                         col.Item().Text("");
                     });
 
+                    if (sale.RoundOff != 0)
+                    {
+                        var roundOffFormatted = sale.RoundOff > 0 ? "+" + sale.RoundOff.ToString("0.00") : sale.RoundOff.ToString("0.00");
+                        table.Cell().ColumnSpan(5).Border(1).Height(20).PaddingVertical(1).PaddingHorizontal(2).AlignRight().Column(col => {
+                            col.Item().Text("Round Off").FontSize(9).Bold();
+                            col.Item().PaddingTop(1).Text("تقريب").FontSize(6).FontFamily(_arabicFont).DirectionFromRightToLeft();
+                        });
+                        table.Cell().Border(1).Height(20).PaddingVertical(1).PaddingHorizontal(1).Column(col => {
+                            col.Item().Text("");
+                        });
+                        table.Cell().Border(1).Height(20).PaddingVertical(1).PaddingHorizontal(1).Column(col => {
+                            col.Item().Text("");
+                        });
+                        table.Cell().Border(1).Height(20).PaddingVertical(1).PaddingHorizontal(1).Column(col => {
+                            col.Item().AlignRight().Text(roundOffFormatted).FontSize(11).Bold();
+                        });
+                    }
+
                     table.Cell().ColumnSpan(6).Border(1).Height(20).PaddingVertical(2).PaddingHorizontal(2).AlignRight().Column(col => {
                         col.Item().Text("Total Amount").FontSize(9).Bold();
                         col.Item().PaddingTop(1).Text(new string('.', 45) + " المجموع").FontSize(9).Bold();

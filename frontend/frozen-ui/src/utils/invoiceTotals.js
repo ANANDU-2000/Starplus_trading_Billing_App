@@ -8,7 +8,7 @@ export function computeInvoiceTotals({ subtotal, vatTotal, discount, roundOff })
   const sub = typeof subtotal === 'number' && !Number.isNaN(subtotal) ? subtotal : 0
   const vat = typeof vatTotal === 'number' && !Number.isNaN(vatTotal) ? vatTotal : 0
   const calcBeforeRound = sub + vat - discountValue
-  const grandTotal = Math.round((calcBeforeRound + roundOffValue) * 100) / 100
+  const grandTotal = parseFloat((calcBeforeRound + roundOffValue).toFixed(2))
   return { subtotal: sub, vatTotal: vat, discountValue, roundOffValue, calcBeforeRound, grandTotal }
 }
 

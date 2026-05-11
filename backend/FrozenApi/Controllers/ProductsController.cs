@@ -26,6 +26,7 @@ namespace FrozenApi.Controllers
 
         [HttpGet]
         [AllowAnonymous]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
         public async Task<ActionResult<ApiResponse<PagedResponse<ProductDto>>>> GetProducts(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10,
@@ -352,6 +353,7 @@ namespace FrozenApi.Controllers
 
         [HttpGet("search")]
         [AllowAnonymous]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
         public async Task<ActionResult<ApiResponse<List<ProductDto>>>> SearchProducts(
             [FromQuery] string? q,
             [FromQuery] int limit = 50,
