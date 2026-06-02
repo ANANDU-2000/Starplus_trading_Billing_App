@@ -648,7 +648,11 @@ const ReportsPage = () => {
   useEffect(() => {
     let debounceTimer = null
     
-            const handleDataUpdate = () => {
+            const handleDataUpdate = (event) => {
+              if (document.visibilityState !== 'visible') return
+              const scope = event?.detail?.scope
+              // Ignore unrelated updates to avoid unnecessary report churn.
+              if (scope && !['payments', 'customers', 'sales'].includes(scope)) return
               // Skip if tab is changing or already fetching
               if (isTabChangingRef.current || isFetchingRef.current) {
                 return

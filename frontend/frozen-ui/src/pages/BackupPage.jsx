@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { backupAPI } from '../services'
 import { useAuth } from '../hooks/useAuth'
 import { Database, HardDrive, Download, Trash2, RefreshCw, Upload, FileText, X, Settings, Cloud } from 'lucide-react'
@@ -13,6 +13,7 @@ const BackupPage = () => {
   const [restoring, setRestoring] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
   const [showCloudSettings, setShowCloudSettings] = useState(false)
+  const isMountedRef = useRef(false)
   const [cloudSettings, setCloudSettings] = useState({
     googleDriveClientId: '',
     googleDriveClientSecret: '',
@@ -21,27 +22,35 @@ const BackupPage = () => {
   })
 
   useEffect(() => {
+    isMountedRef.current = true
     loadBackups()
     
     // Auto-refresh every 120 seconds (reduced frequency - backups don't change often)
     // Only refresh if page is visible
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-      loadBackups()
+        loadBackups({ silent: true })
       }
     }, 120000) // 120 seconds - reduced from 30
     
-    return () => clearInterval(interval)
+    return () => {
+      isMountedRef.current = false
+      clearInterval(interval)
+    }
   }, [])
 
-  const loadBackups = async () => {
+  const loadBackups = async ({ silent = false } = {}) => {
     try {
+      if (!silent) setLoading(true)
       const response = await backupAPI.getBackups()
+      if (!isMountedRef.current) return
       if (response.success) {
         setBackups(response.data || [])
       }
     } catch (error) {
       console.error('Failed to load backups:', error)
+    } finally {
+      if (!silent && isMountedRef.current) setLoading(false)
     }
   }
 

@@ -63,7 +63,14 @@ const PosPage = () => {
   const customerInputRef = useRef(null)
   const productSearchRefs = useRef({})
   const productSearchTimers = useRef({})
+  const uiStateRef = useRef({ isEditMode: false, loading: false, productSearchOpen: false, hasSearchTerms: false })
   const [rowSearchResults, setRowSearchResults] = useState({})
+
+  useEffect(() => {
+    const hasOpenDropdown = Object.values(showProductDropdown || {}).some(Boolean)
+    const hasSearchTerms = Object.keys(productSearchTerms || {}).length > 0
+    uiStateRef.current = { isEditMode, loading, productSearchOpen: hasOpenDropdown, hasSearchTerms }
+  }, [isEditMode, loading, showProductDropdown, productSearchTerms])
 
   // Define loadProducts before useEffect
   const loadProducts = useCallback(async () => {
@@ -254,7 +261,13 @@ const PosPage = () => {
 
     // Auto-refresh when page becomes visible (user returns from other tab/window)
     const handleVisibilityChange = () => {
-      if (!document.hidden) {
+      if (
+        !document.hidden &&
+        !uiStateRef.current.isEditMode &&
+        !uiStateRef.current.loading &&
+        !uiStateRef.current.productSearchOpen &&
+        !uiStateRef.current.hasSearchTerms
+      ) {
         loadProducts()
         loadCustomers()
       }

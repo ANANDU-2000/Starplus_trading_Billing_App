@@ -96,7 +96,10 @@ const DashboardTally = () => {
     
     // Listen for global data update events (with debouncing)
     let debounceTimer = null
-    const handleDataUpdate = () => {
+    const handleDataUpdate = (event) => {
+      if (document.visibilityState !== 'visible') return
+      const scope = event?.detail?.scope
+      if (scope && !['payments', 'customers', 'sales'].includes(scope)) return
       if (debounceTimer) {
         clearTimeout(debounceTimer)
       }

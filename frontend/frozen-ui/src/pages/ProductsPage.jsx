@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Plus, Edit, Trash2, Package, AlertTriangle, Search, Filter, RefreshCw, Download, Upload, MoreVertical, RotateCcw } from 'lucide-react'
 import { productsAPI } from '../services'
 import { useAuth } from '../hooks/useAuth'
@@ -31,6 +31,11 @@ const ProductsPage = () => {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
   const [showInactive, setShowInactive] = useState(false)
+  const uiStateRef = useRef({ showForm: false, showStock: false, search: '' })
+
+  useEffect(() => {
+    uiStateRef.current = { showForm, showStock: showStockModal, search: searchTerm }
+  }, [showForm, showStockModal, searchTerm])
 
   const loadProducts = useCallback(async () => {
     try {
@@ -75,7 +80,12 @@ const ProductsPage = () => {
     // Auto-refresh products every 60 seconds (reduced frequency for better performance)
     // Only refresh if page is visible and not in edit mode
     const refreshInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && !showForm && !showStockModal) {
+      if (
+        document.visibilityState === 'visible' &&
+        !uiStateRef.current.showForm &&
+        !uiStateRef.current.showStock &&
+        !uiStateRef.current.search
+      ) {
         loadProducts()
       }
     }, 60000) // 60 seconds - reduced from 20

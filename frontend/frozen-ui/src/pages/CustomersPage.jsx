@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router-dom'
 import { 
@@ -43,6 +43,16 @@ const CustomersPage = () => {
   const [showLedgerModal, setShowLedgerModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [ledgerData, setLedgerData] = useState([])
+  const modalStateRef = useRef({ add: false, edit: false, ledger: false })
+  const searchTermRef = useRef('')
+
+  useEffect(() => {
+    modalStateRef.current = { add: showAddModal, edit: showEditModal, ledger: showLedgerModal }
+  }, [showAddModal, showEditModal, showLedgerModal])
+
+  useEffect(() => {
+    searchTermRef.current = searchTerm
+  }, [searchTerm])
 
   const {
     register,
@@ -57,8 +67,15 @@ const CustomersPage = () => {
     // Auto-refresh customers and balances every 90 seconds (reduced frequency)
     // Only refresh if page is visible
     const refreshInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && !loading) {
-      fetchCustomers()
+      if (
+        document.visibilityState === 'visible' &&
+        !loading &&
+        !modalStateRef.current.add &&
+        !modalStateRef.current.edit &&
+        !modalStateRef.current.ledger &&
+        !searchTermRef.current
+      ) {
+        fetchCustomers()
       }
     }, 90000) // 90 seconds - reduced from 30
     

@@ -39,12 +39,13 @@ import toast from 'react-hot-toast'
 import PaymentModal from '../components/PaymentModal'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
 import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
-import { openInvoicePdfForPrint, openInvoicePdfForViewing } from '../utils/invoicePdfActions'
+import { openInvoicePdfForViewing } from '../utils/invoicePdfActions'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
+  const [customersLoading, setCustomersLoading] = useState(false)
   const [paymentLoading, setPaymentLoading] = useState(false) // Separate loading state for payment submission
   const [pdfLoading, setPdfLoading] = useState(false)
   const [customerLoading, setCustomerLoading] = useState(false) // Separate loading state for customer creation
@@ -235,11 +236,22 @@ const CustomerLedgerPage = () => {
       const now = Date.now()
       if (now - lastFocusRef.current < 15000) return // skip if we refetched in the last 15 seconds
       lastFocusRef.current = now
+      // Soft refresh currently selected customer only.
       loadCustomerData(selectedCustomer.id)
-      fetchCustomers()
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible' || !selectedCustomer) return
+      const now = Date.now()
+      if (now - lastFocusRef.current < 15000) return
+      lastFocusRef.current = now
+      loadCustomerData(selectedCustomer.id)
     }
     window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [selectedCustomer])
 
   // Filter customers
@@ -286,7 +298,7 @@ const CustomerLedgerPage = () => {
 
   const fetchCustomers = async () => {
     try {
-      setLoading(true)
+      setCustomersLoading(true)
       const response = await customersAPI.getCustomers({ page: 1, pageSize: 1000 })
       if (response.success && response.data) {
         setCustomers(response.data.items || [])
@@ -295,7 +307,7 @@ const CustomerLedgerPage = () => {
       console.error('Failed to load customers:', error)
       toast.error('Failed to load customers')
     } finally {
-      setLoading(false)
+      setCustomersLoading(false)
     }
   }
 
@@ -534,7 +546,7 @@ const CustomerLedgerPage = () => {
     }
   }
 
-  const loadCustomerData = async (customerId) => {
+  const loadCustomerData = async (customerId, { strictValidation = false } = {}) => {
     const loadSeq = ++loadRequestSeqRef.current
     // Handle cash customer (customerId is null or special flag)
     const isCashCustomer = !customerId || customerId === 'cash' || customerId === 0
@@ -708,62 +720,64 @@ const CustomerLedgerPage = () => {
           })
         setCustomerPayments(customerPayments)
         
-        // CRITICAL: VALIDATE AND RECONCILE ALL DATA FOR GUARANTEED ACCURACY
-        const validationReport = await validateAndReconcileCustomerData(
-          customerId,
-          ledgerData,
-          invoicesData,
-          customerPayments,
-          customerRes.success ? customerRes.data : null
-        )
+        if (strictValidation) {
+          // CRITICAL: VALIDATE AND RECONCILE ALL DATA FOR GUARANTEED ACCURACY
+          const validationReport = await validateAndReconcileCustomerData(
+            customerId,
+            ledgerData,
+            invoicesData,
+            customerPayments,
+            customerRes.success ? customerRes.data : null
+          )
 
-        if (selectedCustomerIdRef.current !== customerId) {
-          return
-        }
+          if (selectedCustomerIdRef.current !== customerId) {
+            return
+          }
 
-        // If validation found critical errors, show warning and attempt to fix
-        if (!validationReport.isValid && validationReport.errors.length > 0) {
-          console.error('❌ CRITICAL DATA VALIDATION ERRORS:', validationReport.errors)
-          toast.error(`Data integrity issues detected. ${validationReport.errors.length} error(s) found.`, {
-            duration: 5000
-          })
-          
-          // Attempt to recalculate balance to fix discrepancies
-          const recalcResult = await recalculateCustomerBalance(customerId)
-          if (recalcResult.success) {
-            toast.success('Balance recalculated to fix discrepancies')
-          }
-        } else if (validationReport.warnings.length > 0) {
-          console.warn('⚠️ Data validation warnings:', validationReport.warnings)
-          const balanceMismatch = validationReport.discrepancies.some(d => d.type === 'BALANCE_MISMATCH')
-          const recalcRecent = recalcJustRanRef.current?.customerId === customerId &&
-            (Date.now() - (recalcJustRanRef.current?.at ?? 0)) < RECALC_COOLDOWN_MS
-          if (balanceMismatch && !recalcRecent) {
-            const balanceToastShown = validationToastShownRef.current.balance?.customerId === customerId &&
-              (Date.now() - (validationToastShownRef.current.balance?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
-            if (!balanceToastShown) {
-              toast('Balance discrepancy detected. Recalculating...', { icon: '⚠️' })
-              validationToastShownRef.current = { ...validationToastShownRef.current, balance: { customerId, at: Date.now() } }
-            }
-            const recalcResult = await recalculateCustomerBalance(customerId)
-            recalcJustRanRef.current = { customerId, at: Date.now() }
-            if (recalcResult.success) {
-              console.debug(`Balance recalculation succeeded for customer ${customerId}`)
-            }
-          }
-        }
-        
-        // Verify payment integrity - show toast at most once per customer per throttle window
-        const paymentIntegrity = verifyPaymentIntegrity(customerPayments, invoicesData)
-        if (!paymentIntegrity.isValid) {
-          console.error('❌ Payment integrity issues:', paymentIntegrity.issues)
-          const piToastShown = validationToastShownRef.current.paymentIntegrity?.customerId === customerId &&
-            (Date.now() - (validationToastShownRef.current.paymentIntegrity?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
-          if (!piToastShown) {
-            toast.error(`${paymentIntegrity.issues.length} payment integrity issue(s) detected`, {
+          // If validation found critical errors, show warning and attempt to fix
+          if (!validationReport.isValid && validationReport.errors.length > 0) {
+            console.error('❌ CRITICAL DATA VALIDATION ERRORS:', validationReport.errors)
+            toast.error(`Data integrity issues detected. ${validationReport.errors.length} error(s) found.`, {
               duration: 5000
             })
-            validationToastShownRef.current = { ...validationToastShownRef.current, paymentIntegrity: { customerId, at: Date.now() } }
+            
+            // Attempt to recalculate balance to fix discrepancies
+            const recalcResult = await recalculateCustomerBalance(customerId)
+            if (recalcResult.success) {
+              toast.success('Balance recalculated to fix discrepancies')
+            }
+          } else if (validationReport.warnings.length > 0) {
+            console.warn('⚠️ Data validation warnings:', validationReport.warnings)
+            const balanceMismatch = validationReport.discrepancies.some(d => d.type === 'BALANCE_MISMATCH')
+            const recalcRecent = recalcJustRanRef.current?.customerId === customerId &&
+              (Date.now() - (recalcJustRanRef.current?.at ?? 0)) < RECALC_COOLDOWN_MS
+            if (balanceMismatch && !recalcRecent) {
+              const balanceToastShown = validationToastShownRef.current.balance?.customerId === customerId &&
+                (Date.now() - (validationToastShownRef.current.balance?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
+              if (!balanceToastShown) {
+                toast('Balance discrepancy detected. Recalculating...', { icon: '⚠️' })
+                validationToastShownRef.current = { ...validationToastShownRef.current, balance: { customerId, at: Date.now() } }
+              }
+              const recalcResult = await recalculateCustomerBalance(customerId)
+              recalcJustRanRef.current = { customerId, at: Date.now() }
+              if (recalcResult.success) {
+                console.debug(`Balance recalculation succeeded for customer ${customerId}`)
+              }
+            }
+          }
+          
+          // Verify payment integrity - show toast at most once per customer per throttle window
+          const paymentIntegrity = verifyPaymentIntegrity(customerPayments, invoicesData)
+          if (!paymentIntegrity.isValid) {
+            console.error('❌ Payment integrity issues:', paymentIntegrity.issues)
+            const piToastShown = validationToastShownRef.current.paymentIntegrity?.customerId === customerId &&
+              (Date.now() - (validationToastShownRef.current.paymentIntegrity?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
+            if (!piToastShown) {
+              toast.error(`${paymentIntegrity.issues.length} payment integrity issue(s) detected`, {
+                duration: 5000
+              })
+              validationToastShownRef.current = { ...validationToastShownRef.current, paymentIntegrity: { customerId, at: Date.now() } }
+            }
           }
         }
       }
@@ -884,7 +898,7 @@ const CustomerLedgerPage = () => {
         
         // Trigger global refresh events for other pages/components
         window.dispatchEvent(new CustomEvent('customerCreated', { detail: response.data }))
-        window.dispatchEvent(new CustomEvent('dataUpdated'))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'customers' } }))
         
         // Update URL if customer was created
         if (response?.data?.id) {
@@ -955,7 +969,7 @@ const CustomerLedgerPage = () => {
         }
         
         window.dispatchEvent(new CustomEvent('customerUpdated', { detail: response.data }))
-        window.dispatchEvent(new CustomEvent('dataUpdated'))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'customers' } }))
       } else {
         toast.error(response?.message || 'Failed to update customer')
       }
@@ -1082,30 +1096,13 @@ const CustomerLedgerPage = () => {
         
         // INSTANT UPDATE: Reload ALL customer data immediately to refresh balances, invoices, and outstanding bills
         await Promise.all([
-          loadCustomerData(selectedCustomer.id), // This will refresh ledger, invoices, outstanding invoices, and summary
-          fetchCustomers() // Refresh customer list
+          loadCustomerData(selectedCustomer.id, { strictValidation: true }), // Refresh current customer section data
+          fetchCustomers() // Refresh only customer list
         ])
-        
-        // CRITICAL: Validate data integrity after payment
-        setTimeout(async () => {
-          // Refresh customer data again to get latest balance and status
-          await loadCustomerData(selectedCustomer.id)
-          await fetchCustomers()
-          
-          // Trigger validation to ensure payment was processed correctly
-          const validationResult = await recalculateCustomerBalance(selectedCustomer.id)
-          if (validationResult.success) {
-            console.log('✅ Payment validated and balance verified')
-          }
-          
-          // Trigger global update events
-          window.dispatchEvent(new CustomEvent('paymentCreated', { detail: { customerId: selectedCustomer.id, payment: paymentResult } }))
-          window.dispatchEvent(new CustomEvent('dataUpdated'))
-        }, 2000) // 2 second delay to ensure backend processing is complete
         
         // Trigger global data refresh events for other pages (reports, dashboard, etc.)
         window.dispatchEvent(new CustomEvent('paymentCreated', { detail: { customerId: selectedCustomer.id, payment: paymentResult } }))
-        window.dispatchEvent(new CustomEvent('dataUpdated'))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments', customerId: selectedCustomer.id } }))
       } else {
         toast.error(response?.message || 'Failed to save payment')
       }
@@ -1538,7 +1535,7 @@ const CustomerLedgerPage = () => {
                 </>
               )}
               <button
-                onClick={() => selectedCustomer && loadCustomerData(selectedCustomer.id)}
+                onClick={() => selectedCustomer && loadCustomerData(selectedCustomer.id, { strictValidation: true })}
                 className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
                 title="Refresh"
                 disabled={!selectedCustomer}
@@ -1977,7 +1974,7 @@ const CustomerLedgerPage = () => {
                             if (selectedCustomer) {
                               await loadCustomerData(selectedCustomer.id)
                               await fetchCustomers()
-                              window.dispatchEvent(new CustomEvent('dataUpdated'))
+                              window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments', customerId: selectedCustomer.id } }))
                             }
                           } else {
                             toast.error(response?.message || 'Failed to update payment', { id: 'update-payment' })
@@ -2012,7 +2009,7 @@ const CustomerLedgerPage = () => {
                             if (selectedCustomer) {
                               await loadCustomerData(selectedCustomer.id)
                               await fetchCustomers()
-                              window.dispatchEvent(new CustomEvent('dataUpdated'))
+                              window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments', customerId: selectedCustomer.id } }))
                             }
                           } else {
                             toast.error(response?.message || 'Failed to delete payment', { id: 'delete-payment' })
@@ -2071,13 +2068,6 @@ const CustomerLedgerPage = () => {
           onClose={() => {
             setShowInvoiceModal(false)
             setSelectedInvoiceForView(null)
-          }}
-          onPrint={async () => {
-            try {
-              openInvoicePdfForPrint(selectedInvoiceForView)
-            } catch (error) {
-              toast.error(error?.message || 'Failed to print invoice')
-            }
           }}
         />
       )}

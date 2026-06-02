@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router-dom'
 import { 
@@ -61,6 +61,11 @@ const PaymentsPage = () => {
   const paymentMethod = watch('method')
   const selectedSaleId = watch('saleId')
   const selectedCustomerId = watch('customerId')
+  const modalStateRef = useRef({ add: false, edit: false, receipt: false })
+
+  useEffect(() => {
+    modalStateRef.current = { add: showAddModal, edit: showEditModal, receipt: showReceiptModal }
+  }, [showAddModal, showEditModal, showReceiptModal])
 
   // Load customer details and outstanding invoices when selected
   useEffect(() => {
@@ -159,7 +164,13 @@ const PaymentsPage = () => {
     // Auto-refresh payments and balances every 60 seconds (reduced frequency)
     // Only refresh if page is visible
     const refreshInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && isMounted) {
+      if (
+        document.visibilityState === 'visible' &&
+        isMounted &&
+        !modalStateRef.current.add &&
+        !modalStateRef.current.edit &&
+        !modalStateRef.current.receipt
+      ) {
         fetchDataSafe()
       }
     }, 60000) // 60 seconds - reduced from 20
@@ -347,7 +358,7 @@ const PaymentsPage = () => {
         setSelectedPayment(null)
         // Trigger global update event
         window.dispatchEvent(new CustomEvent('paymentCreated', { detail: { payment: response.data } }))
-        window.dispatchEvent(new CustomEvent('dataUpdated'))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments' } }))
       } else {
         toast.error(response.message || 'Failed to save payment')
       }

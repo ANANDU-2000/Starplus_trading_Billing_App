@@ -8,7 +8,7 @@ import { validatePdfBlob } from '../utils/pdfBlob'
 import { downloadInvoicePdf } from '../utils/invoicePdfActions'
 import PrintOptionsModal from './PrintOptionsModal'
 
-const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => {
+const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onNew }) => {
   const [loading, setLoading] = useState(false)
   const [invoice, setInvoice] = useState(null)
   const [showPrintOptions, setShowPrintOptions] = useState(false)
@@ -35,10 +35,6 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
 
   const handlePrint = () => {
     setShowPrintOptions(true)
-  }
-
-  const handlePrintExecute = () => {
-    if (onPrint) onPrint()
   }
 
   const handleDownload = async () => {
@@ -307,7 +303,6 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
           saleId={saleId}
           invoiceNo={invoice?.invoiceNo || invoiceNo}
           onClose={() => setShowPrintOptions(false)}
-          onPrint={handlePrintExecute}
         />
       )}
     </div>
