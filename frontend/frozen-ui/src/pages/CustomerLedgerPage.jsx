@@ -39,8 +39,7 @@ import toast from 'react-hot-toast'
 import PaymentModal from '../components/PaymentModal'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
 import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+import { openInvoicePdfForPrint, openInvoicePdfForViewing } from '../utils/invoicePdfActions'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
@@ -1874,12 +1873,7 @@ const CustomerLedgerPage = () => {
                       }}
                       onViewPDF={async (invoiceId) => {
                         try {
-                          const pdfUrl = `${API_BASE_URL}/sales/${invoiceId}/pdf?_=${Date.now()}`
-                          const popup = window.open(pdfUrl, '_blank')
-                          if (!popup) {
-                            window.location.href = pdfUrl
-                            toast('Pop-up blocked. Opened invoice in current tab.', { icon: 'ℹ️', duration: 4000 })
-                          }
+                          openInvoicePdfForViewing(invoiceId)
                         } catch (error) {
                           toast.error(error?.message || 'Failed to generate PDF')
                         }
@@ -2089,12 +2083,7 @@ const CustomerLedgerPage = () => {
           }}
           onPrint={async () => {
             try {
-              const printUrl = `${API_BASE_URL}/sales/${selectedInvoiceForView}/pdf?print=1&_=${Date.now()}`
-              const printWindow = window.open(printUrl, '_blank')
-              if (!printWindow) {
-                window.location.href = printUrl
-                toast('Pop-up blocked. Opened invoice in current tab for printing.', { icon: 'ℹ️', duration: 5000 })
-              }
+              openInvoicePdfForPrint(selectedInvoiceForView)
             } catch (error) {
               toast.error(error?.message || 'Failed to print invoice')
             }
@@ -3308,4 +3297,5 @@ const PaymentEntryModal = ({
 }
 
 export default CustomerLedgerPage
+
 

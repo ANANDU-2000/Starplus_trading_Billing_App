@@ -5,6 +5,7 @@ import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
 import { triggerBlobDownload } from '../utils/blobDownload'
 import { validatePdfBlob } from '../utils/pdfBlob'
+import { downloadInvoicePdf } from '../utils/invoicePdfActions'
 import PrintOptionsModal from './PrintOptionsModal'
 
 const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => {
@@ -41,38 +42,9 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
   }
 
   const handleDownload = async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      let pdfBlob
-      try {
-        pdfBlob = await salesAPI.getInvoicePdf(saleId)
-      } catch (apiError) {
-        console.error('API Error:', apiError)
-        toast.error(apiError.message || 'Failed to generate PDF')
-        setLoading(false)
-        return
-      }
-      
-      // Validate blob
-      if (!pdfBlob || !(pdfBlob instanceof Blob)) {
-        toast.error('Invalid PDF data received from server')
-        setLoading(false)
-        return
-      }
-      
-      const blob = pdfBlob instanceof Blob ? pdfBlob : new Blob([pdfBlob], { type: 'application/pdf' })
-      const check = await validatePdfBlob(blob)
-      if (!check.ok) {
-        toast.error(check.message)
-        setLoading(false)
-        return
-      }
-      const invoiceNumber = invoice?.invoiceNo || invoiceNo || saleId
-      triggerBlobDownload(check.blob, `invoice_${invoiceNumber}.pdf`)
-      toast.success('Download started — check your downloads folder')
-    } catch (error) {
-      console.error('Download error:', error)
-      toast.error(error.message || 'Failed to download invoice. Please try again.')
+      await downloadInvoicePdf(saleId, invoice?.invoiceNo || invoiceNo)
     } finally {
       setLoading(false)
     }
@@ -343,4 +315,5 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onPrint, onNew }) => 
 }
 
 export default InvoicePreviewModal
+
 

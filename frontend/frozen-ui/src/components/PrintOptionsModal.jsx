@@ -1,39 +1,22 @@
 import { useState } from 'react'
-import { X, Printer, FileText, Settings } from 'lucide-react'
+import { X, Printer, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { openInvoicePdfForPrint } from '../utils/invoicePdfActions'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
 const PrintOptionsModal = ({ saleId, invoiceNo, onClose, onPrint }) => {
   const [format, setFormat] = useState('A4')
   const [copies, setCopies] = useState(1)
   const [printer, setPrinter] = useState('default')
-  const [orientation, setOrientation] = useState('portrait')
 
   const handlePrint = async () => {
     try {
       if (format === 'A4') {
-        // Direct server PDF URL is more reliable on tablets than blob/scripted print.
-        const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?print=1&_=${Date.now()}`
-        const printWindow = window.open(pdfUrl, '_blank')
-        if (printWindow) {
-          toast.success('Invoice opened. Use browser/PDF print options in that tab.')
-        } else {
-          window.location.href = pdfUrl
-          toast('Pop-up blocked. Opened invoice in current tab for printing.', { icon: 'ℹ️', duration: 5000 })
-        }
+        openInvoicePdfForPrint(saleId)
       } else {
-        // Thermal printer - download or open PDF
-        const pdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?format=thermal&width=${format === 'thermal58' ? '58' : '80'}&_=${Date.now()}`
-        const thermalWindow = window.open(pdfUrl, '_blank')
-        if (thermalWindow) {
-          toast.success('Thermal invoice opened in new tab')
-        } else {
-          window.location.href = pdfUrl
-          toast('Pop-up blocked. Opened thermal invoice in current tab.', { icon: 'ℹ️', duration: 5000 })
-        }
+        openInvoicePdfForPrint(saleId, { format: 'thermal', width: format === 'thermal58' ? '58' : '80' })
       }
-      
+
       if (onPrint) onPrint()
       onClose()
     } catch (error) {
@@ -150,4 +133,6 @@ const PrintOptionsModal = ({ saleId, invoiceNo, onClose, onPrint }) => {
 }
 
 export default PrintOptionsModal
+
+
 

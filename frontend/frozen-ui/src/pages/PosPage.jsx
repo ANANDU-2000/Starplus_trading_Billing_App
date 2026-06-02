@@ -21,11 +21,10 @@ import { productsAPI, salesAPI, customersAPI } from '../services'
 import { formatCurrency, formatBalance, formatBalanceWithColor } from '../utils/currency'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
-import { triggerBlobDownload, isIOSDevice, isLikelyMobileBrowser } from '../utils/blobDownload'
-import { validatePdfBlob, parseApiErrorBlobMessage } from '../utils/pdfBlob'
+import { triggerBlobDownload } from '../utils/blobDownload'
+import { validatePdfBlob } from '../utils/pdfBlob'
+import { downloadInvoicePdf, openInvoicePdfForPrint } from '../utils/invoicePdfActions'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
 const PosPage = () => {
   const navigate = useNavigate()
@@ -472,45 +471,7 @@ const PosPage = () => {
   }
 
   const handleDownloadPdf = async (saleId, invoiceNo) => {
-    const safeName = `INV-${(invoiceNo || saleId || 'invoice').toString().replace(/[^\w.-]+/g, '_')}.pdf`
-    const directPdfUrl = `${API_BASE_URL}/sales/${saleId}/pdf?_=${Date.now()}`
-    try {
-      toast.loading('Preparing PDF…', { id: 'pdf-download-toast' })
-
-      if (isLikelyMobileBrowser()) {
-        const opened = window.open(directPdfUrl, '_blank')
-        toast.dismiss('pdf-download-toast')
-        if (opened) {
-          toast.success(
-            isIOSDevice()
-              ? 'PDF opened — tap Share, then Print or Save to Files'
-              : 'PDF opened in a new tab — use the menu to save or print'
-          )
-          return
-        }
-        window.location.href = directPdfUrl
-        toast.success('Opening invoice PDF in this tab...')
-        return
-      }
-
-      const response = await salesAPI.getInvoicePdf(saleId)
-      const raw = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
-      const check = await validatePdfBlob(raw)
-      if (!check.ok) {
-        toast.dismiss('pdf-download-toast')
-        toast.error(check.message)
-        return
-      }
-
-      triggerBlobDownload(check.blob, safeName)
-      toast.dismiss('pdf-download-toast')
-      toast.success('Download started — check your downloads folder')
-    } catch (error) {
-      toast.dismiss('pdf-download-toast')
-      console.error('Failed to download PDF:', error)
-      const msg = await parseApiErrorBlobMessage(error, 'Failed to download PDF')
-      toast.error(msg)
-    }
+    await downloadInvoicePdf(saleId, invoiceNo, { toastId: 'pdf-download-toast' })
   }
 
   const handlePrintReceipt = async () => {
@@ -519,30 +480,7 @@ const PosPage = () => {
       return
     }
 
-    const saleId = lastCreatedInvoice.id
-    const invoiceNo = lastCreatedInvoice.invoiceNo
-
-    if (!saleId) {
-      toast.error('Invalid sale ID. Cannot print invoice.')
-      return
-    }
-
-    const printUrl = `${API_BASE_URL}/sales/${saleId}/pdf?print=1&_=${Date.now()}`
-
-    // Use direct server URL instead of blob-printing, which is unstable on iPad/tablet browsers.
-    const printTab = window.open(printUrl, '_blank')
-    if (printTab) {
-      toast.success(
-        isIOSDevice()
-          ? 'PDF opened. Tap Share and choose Print.'
-          : 'Invoice opened. Use browser/PDF print option.'
-      )
-      return
-    }
-
-    // Fallback when pop-up is blocked.
-    window.location.href = printUrl
-    toast('Pop-up blocked. Opened invoice in current tab for printing.', { icon: 'ℹ️', duration: 5000 })
+    openInvoicePdfForPrint(lastCreatedInvoice.id)
   }
 
   const handleWhatsAppShare = async () => {
@@ -2101,3 +2039,5 @@ const PosPage = () => {
 }
 
 export default PosPage
+
+

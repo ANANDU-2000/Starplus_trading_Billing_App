@@ -257,9 +257,11 @@ namespace FrozenApi.Controllers
                 var isPrint = Request.Query.ContainsKey("print") || Request.Headers["Accept"].ToString().Contains("application/pdf");
                 var disposition = isPrint ? "inline" : "attachment";
                 
-                Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{filename}\"");
+                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
                 Response.ContentType = "application/pdf";
-                return File(pdfBytes, "application/pdf", filename);
+                return isPrint
+                    ? File(pdfBytes, "application/pdf")
+                    : File(pdfBytes, "application/pdf", filename);
             }
             catch (Exception ex)
             {
@@ -315,9 +317,11 @@ namespace FrozenApi.Controllers
                 var isPrint = Request.Query.ContainsKey("print") || Request.Headers["Accept"].ToString().Contains("application/pdf");
                 var disposition = isPrint ? "inline" : "attachment";
                 
-                Response.Headers.Append("Content-Disposition", $"{disposition}; filename=\"{filename}\"");
+                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
                 Response.ContentType = "application/pdf";
-                return File(pdfBytes, "application/pdf", filename);
+                return isPrint
+                    ? File(pdfBytes, "application/pdf")
+                    : File(pdfBytes, "application/pdf", filename);
             }
             catch (InvalidOperationException ex)
             {
