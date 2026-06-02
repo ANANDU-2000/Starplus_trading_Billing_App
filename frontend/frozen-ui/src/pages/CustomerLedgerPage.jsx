@@ -217,14 +217,6 @@ const CustomerLedgerPage = () => {
     }
   }, [searchParams, customers])
 
-  // Fast first-load UX: when no explicit customer is requested, select first customer immediately.
-  useEffect(() => {
-    if (selectedCustomer || customers.length === 0) return
-    const customerIdParam = searchParams.get('customerId')
-    if (customerIdParam) return
-    setSelectedCustomer(customers[0])
-  }, [customers, selectedCustomer, searchParams])
-
   // Load customer data when selected (debounced to prevent excessive calls).
   // Intentionally does NOT depend on showReceiptModal/selectedPaymentIds so opening/closing receipt modal does not trigger reload.
   useEffect(() => {
