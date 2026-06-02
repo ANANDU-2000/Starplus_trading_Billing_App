@@ -55,6 +55,7 @@ const CustomerLedgerPage = () => {
   const recalculateInProgress = useRef(new Set()) // Track recalculate calls to prevent flooding
   const validationToastShownRef = useRef({ balance: null, paymentIntegrity: null }) // { balance: { customerId, at }, paymentIntegrity: { customerId, at } }
   const recalcJustRanRef = useRef(null) // { customerId, at } - skip balance block if same customer ran recalc recently
+  const loadRequestSeqRef = useRef(0) // Ignore stale async responses when multiple loads race
   /** Always current selected customer id — use after await in loadCustomerData (avoids stale closure when switching customers). */
   const selectedCustomerIdRef = useRef(null)
   const VALIDATION_TOAST_THROTTLE_MS = 15000
@@ -534,6 +535,7 @@ const CustomerLedgerPage = () => {
   }
 
   const loadCustomerData = async (customerId) => {
+    const loadSeq = ++loadRequestSeqRef.current
     // Handle cash customer (customerId is null or special flag)
     const isCashCustomer = !customerId || customerId === 'cash' || customerId === 0
     
@@ -541,13 +543,9 @@ const CustomerLedgerPage = () => {
       // Load cash customer ledger
       try {
         setLoading(true)
-        setCustomerLedger([])
-        setCustomerInvoices([])
-        setCustomerPayments([])
-        setOutstandingInvoices([])
-        setCustomerSummary(null)
         
         const ledgerRes = await customersAPI.getCashCustomerLedger()
+        if (loadSeq !== loadRequestSeqRef.current) return
         
         if (ledgerRes.success && ledgerRes.data) {
           const ledgerData = Array.isArray(ledgerRes.data) ? ledgerRes.data : []
@@ -556,6 +554,7 @@ const CustomerLedgerPage = () => {
         
         // Load cash customer sales
         const salesRes = await salesAPI.getSales({ page: 1, pageSize: 1000 })
+        if (loadSeq !== loadRequestSeqRef.current) return
         if (salesRes.success && salesRes.data) {
           const allSales = salesRes.data.items || []
           const cashSales = allSales.filter(sale => !sale.customerId)
@@ -571,7 +570,9 @@ const CustomerLedgerPage = () => {
         console.error('Failed to load cash customer data:', error)
         toast.error('Failed to load cash customer ledger')
       } finally {
-        setLoading(false)
+        if (loadSeq === loadRequestSeqRef.current) {
+          setLoading(false)
+        }
       }
       return
     }
@@ -589,13 +590,6 @@ const CustomerLedgerPage = () => {
     try {
       setLoading(true)
       
-      // Clear data first to prevent showing stale data
-      setCustomerLedger([])
-      setCustomerInvoices([])
-      setCustomerPayments([])
-      setOutstandingInvoices([])
-      setCustomerSummary(null)
-      
       // Load all data in parallel
       // CRITICAL: Use Reports API which properly filters by customerId on backend
       // This ensures ALL customer invoices are retrieved, not just first 1000 from entire database
@@ -612,6 +606,9 @@ const CustomerLedgerPage = () => {
         customersAPI.getCustomer(customerId)
       ])
 
+      if (loadSeq !== loadRequestSeqRef.current) {
+        return
+      }
       if (selectedCustomerIdRef.current !== customerId) {
         return
       }
@@ -684,7 +681,9 @@ const CustomerLedgerPage = () => {
 
       // Load payments separately
       const paymentsRes = await paymentsAPI.getPayments({ page: 1, pageSize: 1000, customerId })
-      
+      if (loadSeq !== loadRequestSeqRef.current) {
+        return
+      }
       if (selectedCustomerIdRef.current !== customerId) {
         return
       }
@@ -733,8 +732,6 @@ const CustomerLedgerPage = () => {
           const recalcResult = await recalculateCustomerBalance(customerId)
           if (recalcResult.success) {
             toast.success('Balance recalculated to fix discrepancies')
-            // Reload data after recalculation
-            setTimeout(() => loadCustomerData(customerId), 1000)
           }
         } else if (validationReport.warnings.length > 0) {
           console.warn('⚠️ Data validation warnings:', validationReport.warnings)
@@ -751,7 +748,7 @@ const CustomerLedgerPage = () => {
             const recalcResult = await recalculateCustomerBalance(customerId)
             recalcJustRanRef.current = { customerId, at: Date.now() }
             if (recalcResult.success) {
-              setTimeout(() => loadCustomerData(customerId), 1000)
+              console.debug(`Balance recalculation succeeded for customer ${customerId}`)
             }
           }
         }
@@ -793,14 +790,6 @@ const CustomerLedgerPage = () => {
         error._recoveryAttempted = true
         try {
           await recalculateCustomerBalance(customerId)
-          // Don't show recovery toast - it causes flooding
-          // Retry after delay, but only once
-          setTimeout(() => {
-            if (!error._retryAttempted) {
-              error._retryAttempted = true
-              loadCustomerData(customerId)
-            }
-          }, 3000) // 3 second delay before retry
         } catch (recoveryError) {
           // Don't log recovery errors to prevent flooding
           if (!recoveryError._logged) {
@@ -810,7 +799,9 @@ const CustomerLedgerPage = () => {
         }
       }
     } finally {
-      setLoading(false)
+      if (loadSeq === loadRequestSeqRef.current) {
+        setLoading(false)
+      }
     }
   }
 

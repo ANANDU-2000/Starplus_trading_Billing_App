@@ -4,6 +4,7 @@ import { triggerBlobDownload, isIOSDevice, isLikelyMobileBrowser } from './blobD
 import { parseApiErrorBlobMessage, validatePdfBlob } from './pdfBlob'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+const recentOpenBySale = new Map()
 
 function safeInvoiceName (saleId, invoiceNo) {
   return `INV-${String(invoiceNo || saleId || 'invoice').replace(/[^\w.-]+/g, '_')}.pdf`
@@ -48,6 +49,14 @@ export function openInvoicePdfForPrint (saleId, { format, width } = {}) {
     toast.error('Invalid sale ID. Cannot print invoice.')
     return false
   }
+  const now = Date.now()
+  const key = `print:${saleId}`
+  const last = recentOpenBySale.get(key) || 0
+  if (now - last < 700) {
+    console.debug(`[invoice-pdf] ignored duplicate print click for sale ${saleId}`)
+    return false
+  }
+  recentOpenBySale.set(key, now)
 
   const printUrl = invoicePdfUrl(saleId, { print: true, open: true, format, width })
   const method = openPdfWithFallback(printUrl, { forPrint: true })
@@ -69,6 +78,14 @@ export function openInvoicePdfForViewing (saleId) {
     toast.error('Invalid sale ID. Cannot open invoice.')
     return false
   }
+  const now = Date.now()
+  const key = `view:${saleId}`
+  const last = recentOpenBySale.get(key) || 0
+  if (now - last < 700) {
+    console.debug(`[invoice-pdf] ignored duplicate view click for sale ${saleId}`)
+    return false
+  }
+  recentOpenBySale.set(key, now)
 
   const url = invoicePdfUrl(saleId, { open: true })
   const method = openPdfWithFallback(url, { forPrint: false })
