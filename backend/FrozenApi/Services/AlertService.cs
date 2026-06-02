@@ -25,6 +25,11 @@ namespace FrozenApi.Services
 
     public class AlertService : IAlertService
     {
+        private const int AlertTypeMax = 100;
+        private const int AlertTitleMax = 200;
+        private const int AlertMessageMax = 2000;
+        private const int AlertSeverityMax = 50;
+        private const int AlertMetadataMax = 500;
         private readonly AppDbContext _context;
         private readonly ILogger<AlertService> _logger;
 
@@ -38,11 +43,17 @@ namespace FrozenApi.Services
         {
             try
             {
+                var safeType = Truncate(type.ToString(), AlertTypeMax) ?? type.ToString();
+                var safeTitle = Truncate(title, AlertTitleMax) ?? string.Empty;
+                var safeMessage = Truncate(message, AlertMessageMax);
+                var safeSeverity = Truncate(severity.ToString(), AlertSeverityMax) ?? severity.ToString();
+                var safeMetadata = Truncate(metadata != null ? JsonSerializer.Serialize(metadata) : null, AlertMetadataMax);
+
                 // CRITICAL: Prevent duplicate alerts - check for similar alerts in last 5 minutes
                 var cutoffTime = DateTime.UtcNow.AddMinutes(-5);
                 var similarAlert = await _context.Alerts
-                    .Where(a => a.Type == type.ToString() && 
-                               a.Title == title && 
+                    .Where(a => a.Type == safeType && 
+                               a.Title == safeTitle && 
                                a.CreatedAt >= cutoffTime)
                     .OrderByDescending(a => a.CreatedAt)
                     .FirstOrDefaultAsync();
@@ -56,12 +67,12 @@ namespace FrozenApi.Services
 
                 var alert = new Alert
                 {
-                    Type = type.ToString(),
-                    Title = title,
-                    Message = message,
-                    Severity = severity.ToString(),
+                    Type = safeType,
+                    Title = safeTitle,
+                    Message = safeMessage,
+                    Severity = safeSeverity,
                     CreatedAt = DateTime.UtcNow,
-                    Metadata = metadata != null ? JsonSerializer.Serialize(metadata) : null
+                    Metadata = safeMetadata
                 };
 
                 _context.Alerts.Add(alert);
@@ -77,6 +88,21 @@ namespace FrozenApi.Services
             {
                 _logger.LogError(ex, "Failed to create alert: {Type} - {Title}", type, title);
             }
+        }
+
+        private static string? Truncate(string? value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            {
+                return value;
+            }
+
+            if (maxLength <= 3)
+            {
+                return value.Substring(0, maxLength);
+            }
+
+            return value.Substring(0, maxLength - 3) + "...";
         }
 
         public async Task<List<Alert>> GetAlertsAsync(bool unreadOnly = false, int limit = 50)
