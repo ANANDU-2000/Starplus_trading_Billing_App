@@ -44,7 +44,7 @@ import { openInvoicePdfForViewing } from '../utils/invoicePdfActions'
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [customersLoading, setCustomersLoading] = useState(false)
   const [paymentLoading, setPaymentLoading] = useState(false) // Separate loading state for payment submission
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -216,6 +216,14 @@ const CustomerLedgerPage = () => {
       }
     }
   }, [searchParams, customers])
+
+  // Fast first-load UX: when no explicit customer is requested, select first customer immediately.
+  useEffect(() => {
+    if (selectedCustomer || customers.length === 0) return
+    const customerIdParam = searchParams.get('customerId')
+    if (customerIdParam) return
+    setSelectedCustomer(customers[0])
+  }, [customers, selectedCustomer, searchParams])
 
   // Load customer data when selected (debounced to prevent excessive calls).
   // Intentionally does NOT depend on showReceiptModal/selectedPaymentIds so opening/closing receipt modal does not trigger reload.
@@ -1483,7 +1491,7 @@ const CustomerLedgerPage = () => {
   }
 
 
-  if (loading && !selectedCustomer) {
+  if (customersLoading && customers.length === 0 && !selectedCustomer) {
     return <LoadingCard message="Loading customers..." />
   }
 
