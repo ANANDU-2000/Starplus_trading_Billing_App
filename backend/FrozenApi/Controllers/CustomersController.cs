@@ -408,7 +408,24 @@ namespace FrozenApi.Controllers
                 var to = toDate ?? DateTime.UtcNow;
                 
                 var pdfBytes = await _customerService.GenerateCustomerStatementAsync(id, from, to);
-                return File(pdfBytes, "application/pdf", $"customer_statement_{id}_{DateTime.UtcNow:yyyyMMdd}.pdf");
+                var filename = $"customer_statement_{id}_{DateTime.UtcNow:yyyyMMdd}.pdf";
+                var wantsInline = Request.Query.ContainsKey("print")
+                    || Request.Query.ContainsKey("open")
+                    || Request.Headers["Accept"].ToString().Contains("application/pdf", StringComparison.OrdinalIgnoreCase);
+                var disposition = wantsInline ? "inline" : "attachment";
+
+                Response.ContentType = "application/pdf";
+                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                Response.Headers["Cache-Control"] = wantsInline
+                    ? "no-store, no-cache, must-revalidate, max-age=0"
+                    : "private, max-age=60";
+                Response.Headers["Pragma"] = wantsInline ? "no-cache" : "private";
+                Response.Headers["Expires"] = "0";
+
+                return wantsInline
+                    ? File(pdfBytes, "application/pdf")
+                    : File(pdfBytes, "application/pdf", filename);
             }
             catch (InvalidOperationException ex)
             {
@@ -466,8 +483,25 @@ namespace FrozenApi.Controllers
                 
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
                 var pdfBytes = await pdfService.GenerateCustomerPendingBillsPdfAsync(filteredInvoices, customer, DateTime.UtcNow, from, to);
-                
-                return File(pdfBytes, "application/pdf", $"pending_bills_{customer.Name}_{from:yyyy-MM-dd}_to_{to:yyyy-MM-dd}.pdf");
+
+                var filename = $"pending_bills_{customer.Name}_{from:yyyy-MM-dd}_to_{to:yyyy-MM-dd}.pdf";
+                var wantsInline = Request.Query.ContainsKey("print")
+                    || Request.Query.ContainsKey("open")
+                    || Request.Headers["Accept"].ToString().Contains("application/pdf", StringComparison.OrdinalIgnoreCase);
+                var disposition = wantsInline ? "inline" : "attachment";
+
+                Response.ContentType = "application/pdf";
+                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                Response.Headers["Cache-Control"] = wantsInline
+                    ? "no-store, no-cache, must-revalidate, max-age=0"
+                    : "private, max-age=60";
+                Response.Headers["Pragma"] = wantsInline ? "no-cache" : "private";
+                Response.Headers["Expires"] = "0";
+
+                return wantsInline
+                    ? File(pdfBytes, "application/pdf")
+                    : File(pdfBytes, "application/pdf", filename);
             }
             catch (Exception ex)
             {

@@ -438,7 +438,13 @@ export const paymentsAPI = {
   },
 
   getReceiptPdf: async (receiptId) => {
-    const response = await api.get(`/payments/receipt/${receiptId}/pdf`, { responseType: 'blob' })
+    const response = await api.get(`/payments/receipt/${receiptId}/pdf`, {
+      responseType: 'blob',
+      timeout: 120000,
+      headers: {
+        Accept: 'application/pdf'
+      }
+    })
     return response.data
   },
 }

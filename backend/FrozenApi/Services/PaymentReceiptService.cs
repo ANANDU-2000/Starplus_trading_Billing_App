@@ -4,6 +4,9 @@ Purpose: Generate and store payment receipts
 using Microsoft.EntityFrameworkCore;
 using FrozenApi.Data;
 using FrozenApi.Models;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 
 namespace FrozenApi.Services
 {
@@ -24,6 +27,8 @@ namespace FrozenApi.Services
         {
             _context = context;
             _receiptNumberService = receiptNumberService;
+            QuestPDF.Settings.License = LicenseType.Community;
+            QuestPDF.Settings.CheckIfAllTextGlyphsAreAvailable = false;
         }
 
         public async Task<PaymentReceiptDto> GenerateReceiptAsync(int userId, int[] paymentIds)
@@ -305,50 +310,111 @@ namespace FrozenApi.Services
             return await GenerateReceiptPdfAsync(dto);
         }
 
-        private async Task<byte[]> GenerateReceiptPdfAsync(PaymentReceiptDto dto)
+        private Task<byte[]> GenerateReceiptPdfAsync(PaymentReceiptDto dto)
         {
-            var html = await BuildReceiptHtmlAsync(dto);
-            return System.Text.Encoding.UTF8.GetBytes(html);
-        }
-
-        private Task<string> BuildReceiptHtmlAsync(PaymentReceiptDto dto)
-        {
-            var invoiceRows = dto.Invoices.Where(inv => inv.InvoiceNo != "Advance / On Account").OrderBy(inv => inv.InvoiceDate).ThenBy(inv => inv.InvoiceNo).ToList();
-            var advanceRows = dto.Invoices.Where(inv => inv.InvoiceNo == "Advance / On Account").OrderBy(inv => inv.InvoiceDate).ToList();
+            var invoiceRows = dto.Invoices
+                .Where(inv => inv.InvoiceNo != "Advance / On Account")
+                .OrderBy(inv => inv.InvoiceDate)
+                .ThenBy(inv => inv.InvoiceNo)
+                .ToList();
+            var advanceRows = dto.Invoices
+                .Where(inv => inv.InvoiceNo == "Advance / On Account")
+                .OrderBy(inv => inv.InvoiceDate)
+                .ToList();
             var sortedInvoices = invoiceRows.Concat(advanceRows).ToList();
-            var rows = sortedInvoices.Select(inv => $@"
-                <tr>
-                    <td>{inv.InvoiceNo}</td>
-                    <td>{inv.InvoiceDate:dd-MM-yyyy}</td>
-                    <td>{inv.InvoiceTotal:N2}</td>
-                    <td>{inv.AmountApplied:N2}</td>
-                </tr>").ToList();
-            var invoicesRows = string.Join("", rows);
-            if (string.IsNullOrEmpty(invoicesRows))
-                invoicesRows = "<tr><td colspan=\"4\">Payment on Account</td></tr>";
+            if (sortedInvoices.Count == 0)
+            {
+                sortedInvoices.Add(new PaymentReceiptInvoiceLineDto
+                {
+                    InvoiceNo = "Payment on Account",
+                    InvoiceDate = dto.GeneratedAt,
+                    InvoiceTotal = 0,
+                    AmountApplied = dto.TotalAmount
+                });
+            }
 
-            var html = $@"<!DOCTYPE html><html><head><meta charset=""utf-8""/><style>
-body{{font-family:Arial,sans-serif;margin:20px;}}
-table{{border-collapse:collapse;width:100%;}}
-th,td{{border:1px solid #000;padding:6px;text-align:left;}}
-th{{background:#f0f0f0;}}
-.total{{font-weight:bold;}}
-</style></head><body>
-<div style=""text-align:center;font-weight:bold;font-size:16px;"">PAYMENT RECEIPT / إيصال دفع</div>
-<div style=""margin-top:12px;""><strong>Receipt No:</strong> {dto.ReceiptNumber} &nbsp; <strong>Date:</strong> {dto.GeneratedAt:dd-MM-yyyy}</div>
-<div style=""margin-top:8px;"">{dto.CompanyNameEn}<br/>{dto.CompanyAddress} | TRN: {dto.CompanyTrn} | {dto.CompanyPhone}</div>
-<div style=""margin-top:12px;""><strong>Received From:</strong> {dto.CustomerName}<br/>TRN: {dto.CustomerTrn ?? "-"}<br/>{dto.CustomerAddress ?? ""}</div>
-<div style=""margin-top:8px;""><strong>Payment Method:</strong> {string.Join(", ", dto.Payments.Select(p => p.Method).Distinct())}</div>
-<div style=""margin-top:6px;font-size:13px;""><strong>Payment date(s):</strong> {string.Join(", ", dto.Payments.Select(p => p.PaymentDate.ToString("dd-MM-yyyy")).Distinct())}</div>
-<table style=""margin-top:12px;"">
-<thead><tr><th>Invoice No</th><th>Invoice Date</th><th>Invoice Total</th><th>Paid Amount</th></tr></thead>
-<tbody>{invoicesRows}</tbody>
-</table>
-<div style=""margin-top:12px;font-weight:bold;"">Total Paid: {dto.TotalAmount:N2} AED</div>
-<div style=""margin-top:24px;"">Received by: _______________________ &nbsp; For {dto.CompanyNameEn}</div>
-<div style=""margin-top:8px;font-size:10px;color:#666;"">This is a computer generated receipt.</div>
-</body></html>";
-            return Task.FromResult(html);
+            var paymentMethods = string.Join(", ", dto.Payments.Select(p => p.Method).Distinct());
+            var paymentDates = string.Join(", ", dto.Payments.Select(p => p.PaymentDate.ToString("dd-MM-yyyy")).Distinct());
+
+            var document = Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(36);
+                    page.DefaultTextStyle(x => x.FontSize(10));
+
+                    page.Header().Column(col =>
+                    {
+                        col.Item().AlignCenter().Text("PAYMENT RECEIPT").Bold().FontSize(16);
+                        col.Item().AlignCenter().Text("Receipt / Payment Acknowledgement").FontSize(9);
+                        col.Item().PaddingTop(8).Row(row =>
+                        {
+                            row.RelativeItem().Text($"Receipt No: {dto.ReceiptNumber}");
+                            row.RelativeItem().AlignRight().Text($"Date: {dto.GeneratedAt:dd-MM-yyyy}");
+                        });
+                        col.Item().PaddingTop(6).Text(dto.CompanyNameEn).Bold();
+                        if (!string.IsNullOrWhiteSpace(dto.CompanyAddress))
+                            col.Item().Text(dto.CompanyAddress);
+                        col.Item().Text($"TRN: {dto.CompanyTrn}  |  Phone: {dto.CompanyPhone}");
+                    });
+
+                    page.Content().PaddingVertical(12).Column(col =>
+                    {
+                        col.Item().Text("Received From").Bold();
+                        col.Item().Text(dto.CustomerName);
+                        col.Item().Text($"TRN: {dto.CustomerTrn ?? "-"}");
+                        if (!string.IsNullOrWhiteSpace(dto.CustomerAddress))
+                            col.Item().Text(dto.CustomerAddress);
+
+                        col.Item().PaddingTop(8).Text($"Payment Method: {paymentMethods}");
+                        col.Item().Text($"Payment Date(s): {paymentDates}");
+
+                        col.Item().PaddingTop(12).Table(table =>
+                        {
+                            table.ColumnsDefinition(columns =>
+                            {
+                                columns.RelativeColumn(2);
+                                columns.RelativeColumn(1.5f);
+                                columns.RelativeColumn(1.5f);
+                                columns.RelativeColumn(1.5f);
+                            });
+
+                            table.Header(header =>
+                            {
+                                header.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(4).Text("Invoice No").Bold();
+                                header.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(4).Text("Invoice Date").Bold();
+                                header.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(4).AlignRight().Text("Invoice Total").Bold();
+                                header.Cell().Border(1).Background(Colors.Grey.Lighten3).Padding(4).AlignRight().Text("Paid Amount").Bold();
+                            });
+
+                            foreach (var inv in sortedInvoices)
+                            {
+                                table.Cell().Border(1).Padding(4).Text(inv.InvoiceNo);
+                                table.Cell().Border(1).Padding(4).Text(inv.InvoiceDate.ToString("dd-MM-yyyy"));
+                                table.Cell().Border(1).Padding(4).AlignRight().Text(inv.InvoiceTotal.ToString("N2"));
+                                table.Cell().Border(1).Padding(4).AlignRight().Text(inv.AmountApplied.ToString("N2"));
+                            }
+                        });
+
+                        col.Item().PaddingTop(10).Text($"Total Paid: {dto.TotalAmount:N2} AED").Bold().FontSize(12);
+                        col.Item().PaddingTop(4).Text($"Amount in words: {dto.AmountInWords}");
+                        col.Item().PaddingTop(8).Text($"Previous Balance: {dto.PreviousBalance:N2} AED");
+                        col.Item().Text($"Remaining Balance: {dto.RemainingBalance:N2} AED");
+                    });
+
+                    page.Footer().Column(col =>
+                    {
+                        col.Item().PaddingTop(24).Text("Received by: _______________________");
+                        col.Item().PaddingTop(4).Text($"For {dto.CompanyNameEn}");
+                        col.Item().PaddingTop(8).Text("This is a computer generated receipt.").FontSize(8).FontColor(Colors.Grey.Medium);
+                        if (dto.IsReprint)
+                            col.Item().Text("REPRINT").Bold().FontColor(Colors.Red.Medium);
+                    });
+                });
+            });
+
+            return Task.FromResult(document.GeneratePdf());
         }
 
         public async Task<List<PaymentReceiptDto>> GetReceiptsByCustomerAsync(int customerId)

@@ -28,7 +28,6 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { formatCurrency, formatBalance } from '../utils/currency'
-import { parseApiErrorBlobMessage, validatePdfBlob } from '../utils/pdfBlob'
 import { isNetworkErrorToSuppress } from '../utils/apiError'
 import { LoadingCard, LoadingButton } from '../components/Loading'
 import { Input, Select } from '../components/Form'
@@ -39,7 +38,7 @@ import toast from 'react-hot-toast'
 import PaymentModal from '../components/PaymentModal'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
 import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
-import { openInvoicePdfForViewing } from '../utils/invoicePdfActions'
+import { openInvoicePdfForViewing, openStatementPdfForPrint, downloadStatementPdf, openPendingBillsPdfForPrint, downloadPendingBillsPdf } from '../utils/invoicePdfActions'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
@@ -180,7 +179,7 @@ const CustomerLedgerPage = () => {
       link.click()
       document.body.removeChild(link)
 
-      toast.success('Ledger exported to Excel successfully')
+      toast.success('Ledger exported to CSV successfully')
     } catch (error) {
       console.error('Export error:', error)
       toast.error('Failed to export ledger')
@@ -1144,7 +1143,15 @@ const CustomerLedgerPage = () => {
     }
   }
 
-  const handleExportPDF = async () => {
+  const handlePrintStatementPDF = () => {
+    if (!selectedCustomer || !selectedCustomer.id || selectedCustomer.id === 'cash') {
+      toast.error('Please select a customer first')
+      return
+    }
+    openStatementPdfForPrint(selectedCustomer.id, dateRange.from, dateRange.to)
+  }
+
+  const handleDownloadStatementPDF = async () => {
     if (!selectedCustomer || !selectedCustomer.id) {
       toast.error('Please select a customer first')
       return
@@ -1154,158 +1161,51 @@ const CustomerLedgerPage = () => {
       return
     }
 
-    const customerId = selectedCustomer.id
-    const customerName = selectedCustomer.name || 'Customer'
-    const fromStr = dateRange.from
-    const toStr = dateRange.to
-
     setPdfLoading(true)
-    const loadingToast = toast.loading('Generating ledger PDF...')
     try {
-      const fromDate = new Date(fromStr)
-      const toDate = new Date(toStr)
-
-      if (selectedCustomerIdRef.current !== customerId) {
-        toast.error('Customer selection changed. Please try again.')
-        return
-      }
-
-      const pdfBlob = await customersAPI.getCustomerStatement(
-        customerId,
-        fromDate.toISOString(),
-        toDate.toISOString()
+      await downloadStatementPdf(
+        selectedCustomer.id,
+        dateRange.from,
+        dateRange.to,
+        selectedCustomer.name || 'Customer'
       )
-
-      if (selectedCustomerIdRef.current !== customerId) {
-        toast.error('Customer selection changed.')
-        return
-      }
-
-      const pdfCheck = await validatePdfBlob(pdfBlob)
-      if (!pdfCheck.ok) {
-        toast.error(pdfCheck.message)
-        return
-      }
-
-      const url = window.URL.createObjectURL(pdfCheck.blob)
-      try {
-        const viewA = document.createElement('a')
-        viewA.href = url
-        viewA.target = '_blank'
-        viewA.rel = 'noopener noreferrer'
-        viewA.style.display = 'none'
-        document.body.appendChild(viewA)
-        viewA.click()
-        document.body.removeChild(viewA)
-      } catch {
-        try {
-          window.open(url, '_blank', 'noopener,noreferrer')
-        } catch {
-          /* popup blocked — download still works */
-        }
-      }
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `Ledger_${customerName}_${new Date().toISOString().split('T')[0]}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
-      toast.success('PDF ready — opened in new tab if allowed; also downloading.')
-    } catch (error) {
-      console.error('Failed to export PDF:', error)
-      if (!isNetworkErrorToSuppress(error)) {
-        const msg = await parseApiErrorBlobMessage(error, 'Failed to export PDF')
-        toast.error(msg)
-      }
     } finally {
-      toast.dismiss(loadingToast)
       setPdfLoading(false)
     }
   }
 
-  const handlePendingBillsPdf = async () => {
-    if (!selectedCustomer || !selectedCustomer.id) {
+  const handlePrintPendingBillsPDF = () => {
+    if (!selectedCustomer || !selectedCustomer.id || selectedCustomer.id === 'cash') {
       toast.error('Please select a customer first')
       return
     }
-    if (selectedCustomer.id === 'cash') {
-      toast.error('Not available for cash customer view')
+    openPendingBillsPdfForPrint(selectedCustomer.id, dateRange.from, dateRange.to)
+  }
+
+  const handleDownloadPendingBillsPDF = async () => {
+    if (!selectedCustomer || !selectedCustomer.id || selectedCustomer.id === 'cash') {
+      toast.error('Please select a customer first')
       return
     }
 
-    const customerId = selectedCustomer.id
-    const customerName = selectedCustomer.name || 'Customer'
-    const fromDate = dateRange.from
-    const toDate = dateRange.to
-
     setPdfLoading(true)
-    const loadingToast = toast.loading('Generating PDF...')
     try {
-      if (selectedCustomerIdRef.current !== customerId) {
-        toast.error('Customer selection changed. Please try again.')
-        return
-      }
-
-      const pdfBlob = await customersAPI.getCustomerPendingBillsPdf(
-        customerId,
-        fromDate,
-        toDate
+      await downloadPendingBillsPdf(
+        selectedCustomer.id,
+        dateRange.from,
+        dateRange.to,
+        selectedCustomer.name || 'Customer'
       )
-
-      if (selectedCustomerIdRef.current !== customerId) {
-        toast.error('Customer selection changed.')
-        return
-      }
-
-      const pdfCheck = await validatePdfBlob(pdfBlob)
-      if (!pdfCheck.ok) {
-        toast.error(pdfCheck.message)
-        return
-      }
-
-      const url = window.URL.createObjectURL(pdfCheck.blob)
-      try {
-        const viewA = document.createElement('a')
-        viewA.href = url
-        viewA.target = '_blank'
-        viewA.rel = 'noopener noreferrer'
-        viewA.style.display = 'none'
-        document.body.appendChild(viewA)
-        viewA.click()
-        document.body.removeChild(viewA)
-      } catch {
-        try {
-          window.open(url, '_blank', 'noopener,noreferrer')
-        } catch {
-          /* popup blocked */
-        }
-      }
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `Pending_Bills_${customerName}_${fromDate}_to_${toDate}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      setTimeout(() => window.URL.revokeObjectURL(url), 60000)
-      toast.success('PDF ready — opened in new tab if allowed; also downloading.')
-    } catch (error) {
-      console.error('Failed to export pending bills PDF:', error)
-      if (!isNetworkErrorToSuppress(error)) {
-        const msg = await parseApiErrorBlobMessage(error, 'Failed to export PDF')
-        toast.error(msg)
-      }
     } finally {
-      toast.dismiss(loadingToast)
       setPdfLoading(false)
     }
   }
 
   const handleExportStatement = async () => {
-    await handleExportPDF()
+    handlePrintStatementPDF()
   }
 
-  handleExportPDFRef.current = handleExportPDF
+  handleExportPDFRef.current = handlePrintStatementPDF
   handleExportStatementRef.current = handleExportStatement
 
   // WhatsApp Sharing Handler
@@ -1356,114 +1256,6 @@ const CustomerLedgerPage = () => {
     }
   }
 
-  // Print Preview Handler
-  const handlePrintPreview = () => {
-    if (!selectedCustomer || customerLedger.length === 0) {
-      toast.error('No data to print')
-      return
-    }
-
-    // Create print window
-    const printWindow = window.open('', '_blank')
-    const filteredEntries = customerLedger.filter(entry => {
-      const entryDate = new Date(entry.date)
-      const fromDate = new Date(dateRange.from)
-      const toDate = new Date(dateRange.to)
-      toDate.setHours(23, 59, 59, 999)
-      return entryDate >= fromDate && entryDate <= toDate
-    })
-
-    const totalDebit = filteredEntries.reduce((sum, e) => sum + (e.debit || 0), 0)
-    const totalCredit = filteredEntries.reduce((sum, e) => sum + (e.credit || 0), 0)
-    const closingBalance = filteredEntries.length > 0 ? filteredEntries[filteredEntries.length - 1].balance : 0
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Customer Ledger Statement - ${selectedCustomer.name}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            h1 { color: #1e40af; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f3f4f6; font-weight: bold; }
-            .debit-row { background-color: #fee2e2; }
-            .credit-row { background-color: #dcfce7; }
-            .summary { margin-top: 20px; padding: 15px; background-color: #f9fafb; border-radius: 5px; }
-            @media print { body { margin: 0; } }
-          </style>
-        </head>
-        <body>
-          <h1>STARPLUS FOODSTUFF TRADING</h1>
-          <h2>Customer Ledger Statement</h2>
-          <p><strong>Customer:</strong> ${selectedCustomer.name}</p>
-          <p><strong>TRN:</strong> ${selectedCustomer.trn || 'N/A'}</p>
-          <p><strong>Period:</strong> ${new Date(dateRange.from).toLocaleDateString()} to ${new Date(dateRange.to).toLocaleDateString()}</p>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Invoice No</th>
-                <th>Payment Mode</th>
-                <th>Debit</th>
-                <th>Credit</th>
-                <th>Status</th>
-                <th>Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredEntries.map(entry => {
-                const dateStr = entry.type === 'Payment'
-                  ? new Date(entry.date).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                  : new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                const rowClass = entry.debit > 0 ? 'debit-row' : entry.credit > 0 ? 'credit-row' : ''
-                return `<tr class="${rowClass}">
-                  <td>${dateStr}</td>
-                  <td>${entry.type || ''}</td>
-                  <td>${entry.reference || '-'}</td>
-                  <td>${entry.paymentMode || entry.PaymentMode || '-'}</td>
-                  <td>${entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
-                  <td>${entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
-                  <td>${entry.status || '-'}</td>
-                  <td>${formatBalance(entry.balance)}</td>
-                </tr>`
-              }).join('')}
-            </tbody>
-            <tfoot>
-              <tr style="background-color: #f3f4f6; font-weight: bold;">
-                <td colspan="4">CLOSING BALANCE</td>
-                <td>${formatCurrency(totalDebit)}</td>
-                <td>${formatCurrency(totalCredit)}</td>
-                <td>-</td>
-                <td>${formatBalance(closingBalance)}</td>
-              </tr>
-            </tfoot>
-          </table>
-          
-          <div class="summary">
-            <h3>Summary</h3>
-            <p>Total Debit: ${formatCurrency(totalDebit)}</p>
-            <p>Total Credit: ${formatCurrency(totalCredit)}</p>
-            <p>Net Balance: ${formatBalance(closingBalance)}</p>
-          </div>
-          
-          <p style="margin-top: 30px; font-size: 12px; color: #666;">
-            Generated on ${new Date().toLocaleString()}
-          </p>
-        </body>
-      </html>
-    `)
-    printWindow.document.close()
-    printWindow.focus()
-    setTimeout(() => {
-      printWindow.print()
-    }, 250)
-  }
-
-
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case 'paid': return 'bg-green-100 text-green-800'
@@ -1508,10 +1300,10 @@ const CustomerLedgerPage = () => {
                 <>
                   <button
                     type="button"
-                    onClick={handleExportPDF}
+                    onClick={handleDownloadStatementPDF}
                     disabled={pdfLoading}
                     className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Export PDF (F7)"
+                    title="Download PDF Statement"
                   >
                     {pdfLoading ? (
                       <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
@@ -1521,10 +1313,10 @@ const CustomerLedgerPage = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={handleExportPDF}
+                    onClick={handlePrintStatementPDF}
                     disabled={pdfLoading}
                     className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Ledger PDF (same as F7)"
+                    title="Print PDF Statement (F7)"
                   >
                     {pdfLoading ? (
                       <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
@@ -1722,7 +1514,7 @@ const CustomerLedgerPage = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={handlePendingBillsPdf}
+                          onClick={handlePrintPendingBillsPDF}
                           disabled={pdfLoading}
                           className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Pending Bills PDF (Outstanding Invoices Only) - Uses Date Filter"
@@ -1736,10 +1528,10 @@ const CustomerLedgerPage = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={handleExportPDF}
+                          onClick={handlePrintStatementPDF}
                           disabled={pdfLoading}
                           className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-800 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Full Ledger PDF (F7)"
+                          title="Print Full Ledger PDF (F7)"
                         >
                           {pdfLoading ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
@@ -1841,10 +1633,10 @@ const CustomerLedgerPage = () => {
                         })}
                       customer={selectedCustomer}
                       onExportExcel={handleExportExcel}
-                      onGeneratePDF={handleExportStatement}
+                      onGeneratePDF={handleDownloadStatementPDF}
+                      onPrintPDF={handlePrintStatementPDF}
                       pdfLoading={pdfLoading}
                       onShareWhatsApp={handleShareWhatsApp}
-                      onPrintPreview={handlePrintPreview}
                       filters={ledgerFilters}
                       onFilterChange={(key, value) => setLedgerFilters(prev => ({ ...prev, [key]: value }))}
                     />
@@ -2361,9 +2153,9 @@ const LedgerStatementTab = ({
   customer,
   onExportExcel,
   onGeneratePDF,
+  onPrintPDF,
   pdfLoading,
   onShareWhatsApp,
-  onPrintPreview,
   filters,
   onFilterChange
 }) => {
@@ -2425,20 +2217,19 @@ const LedgerStatementTab = ({
             </select>
             {/* Action Buttons */}
             <button
-              onClick={onPrintPreview}
+              onClick={onPrintPDF}
               className="px-3 py-1.5 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 flex items-center space-x-1"
-              title="Print Preview"
+              title="Print PDF Statement"
             >
-              <Eye className="h-3 w-3" />
-              <span>Preview</span>
+              <Printer className="h-3 w-3" />
+              <span>Print PDF</span>
             </button>
             <button
               onClick={onExportExcel}
               className="px-3 py-1.5 text-xs bg-green-500 text-white rounded hover:bg-green-600 flex items-center space-x-1"
-              title="Export to Excel"
+              title="Export to CSV"
             >
-              <span>📊</span>
-              <span>Excel</span>
+              <span>CSV</span>
             </button>
             <button
               type="button"
@@ -2450,9 +2241,9 @@ const LedgerStatementTab = ({
               {pdfLoading ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <Printer className="h-3 w-3" />
+                <Download className="h-3 w-3" />
               )}
-              <span>PDF</span>
+              <span>Download PDF</span>
             </button>
             <button
               onClick={onShareWhatsApp}

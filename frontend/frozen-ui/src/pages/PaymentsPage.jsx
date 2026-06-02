@@ -16,6 +16,7 @@ import {
   Edit,
   Download,
   FileText,
+  Printer,
   User,
   Phone,
   Mail,
@@ -25,10 +26,11 @@ import { formatCurrency, formatBalance, formatBalanceWithColor } from '../utils/
 import { LoadingCard, LoadingButton } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import Modal from '../components/Modal'
+import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
 import { paymentsAPI, customersAPI, salesAPI } from '../services'
 import toast from 'react-hot-toast'
-import { triggerBlobDownload } from '../utils/blobDownload'
-import { validatePdfBlob, validateHtmlReceiptBlob, parseApiErrorBlobMessage } from '../utils/pdfBlob'
+import { parseApiErrorBlobMessage } from '../utils/pdfBlob'
+import { downloadReceiptPdf, openReceiptPdfForPrint } from '../utils/invoicePdfActions'
 
 const PaymentsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -45,7 +47,7 @@ const PaymentsPage = () => {
   const [sales, setSales] = useState([])
   const [selectedCustomerDetails, setSelectedCustomerDetails] = useState(null)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
-  const [receiptPayment, setReceiptPayment] = useState(null)
+  const [receiptPaymentIds, setReceiptPaymentIds] = useState([])
   const [outstandingInvoices, setOutstandingInvoices] = useState([])
   const [loadingInvoices, setLoadingInvoices] = useState(false)
 
@@ -384,47 +386,32 @@ const PaymentsPage = () => {
   }
 
   const handleViewReceipt = (payment) => {
-    setReceiptPayment(payment)
+    setReceiptPaymentIds([payment.id])
     setShowReceiptModal(true)
+  }
+
+  const ensureReceiptId = async (payment) => {
+    const res = await paymentsAPI.generateReceipt(payment.id)
+    const data = res?.data ?? res
+    const receiptId = data?.id ?? data?.Id
+    if (receiptId == null) throw new Error('Invalid receipt response')
+    return { receiptId, receiptNumber: data?.receiptNumber || data?.ReceiptNumber }
+  }
+
+  const handlePrintReceipt = async (payment) => {
+    try {
+      const { receiptId } = await ensureReceiptId(payment)
+      openReceiptPdfForPrint(receiptId)
+    } catch (error) {
+      console.error('Failed to print receipt:', error)
+      toast.error(await parseApiErrorBlobMessage(error, 'Failed to print receipt'))
+    }
   }
 
   const handleDownloadReceipt = async (payment) => {
     try {
-      if (payment.saleId) {
-        const response = await salesAPI.getInvoicePdf(payment.saleId)
-        const raw = response instanceof Blob ? response : new Blob([response], { type: 'application/pdf' })
-        const check = await validatePdfBlob(raw)
-        if (!check.ok) {
-          toast.error(check.message)
-          return
-        }
-        triggerBlobDownload(check.blob, `payment_receipt_${payment.invoiceNo || payment.id}.pdf`)
-        toast.success('Download started — check your downloads folder')
-      } else {
-        const tid = toast.loading('Generating payment receipt...')
-        try {
-          const res = await paymentsAPI.generateReceipt(payment.id)
-          const data = res?.data ?? res
-          const receiptId = data?.id ?? data?.Id
-          if (receiptId == null) throw new Error('Invalid receipt response')
-          const pdfRes = await paymentsAPI.getReceiptPdf(receiptId)
-          const blob = pdfRes instanceof Blob ? pdfRes : new Blob([pdfRes])
-          const htmlCheck = await validateHtmlReceiptBlob(blob)
-          if (!htmlCheck.ok) {
-            toast.dismiss(tid)
-            toast.error(htmlCheck.message)
-            return
-          }
-          const safeName = String(data.receiptNumber || receiptId).replace(/[/\\?%*:|"<>]/g, '-')
-          const htmlBlob = new Blob([htmlCheck.html], { type: 'text/html;charset=utf-8' })
-          triggerBlobDownload(htmlBlob, `Receipt-${safeName}.html`)
-          toast.dismiss(tid)
-          toast.success('Download started — check your downloads folder')
-        } catch (e) {
-          toast.dismiss(tid)
-          toast.error(await parseApiErrorBlobMessage(e, 'Failed to generate receipt'))
-        }
-      }
+      const { receiptId, receiptNumber } = await ensureReceiptId(payment)
+      await downloadReceiptPdf(receiptId, receiptNumber)
     } catch (error) {
       console.error('Failed to download receipt:', error)
       toast.error(await parseApiErrorBlobMessage(error, 'Failed to download receipt'))
@@ -674,6 +661,13 @@ const PaymentsPage = () => {
                           title="View Receipt"
                         >
                           <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handlePrintReceipt(payment)}
+                          className="text-gray-700 hover:text-gray-900"
+                          title="Print Receipt PDF"
+                        >
+                          <Printer className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDownloadReceipt(payment)}
@@ -1137,102 +1131,14 @@ const PaymentsPage = () => {
         </form>
       </Modal>
 
-      {/* Payment Receipt/Invoice Modal */}
-      <Modal
+      <ReceiptPreviewModal
+        paymentIds={receiptPaymentIds}
         isOpen={showReceiptModal}
         onClose={() => {
           setShowReceiptModal(false)
-          setReceiptPayment(null)
+          setReceiptPaymentIds([])
         }}
-        title="Payment Receipt / Tax Invoice"
-        size="lg"
-      >
-        {receiptPayment && (
-          <div className="space-y-6">
-            {/* Receipt Header */}
-            <div className="border-b pb-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900">PAYMENT RECEIPT</h3>
-                  <p className="text-sm text-gray-500 mt-1">Payment ID: #{receiptPayment.id}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-500">Date</p>
-                  <p className="text-sm font-medium text-gray-900">{formatDate(receiptPayment.paymentDate)}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Customer Information */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <User className="h-4 w-4 mr-2" />
-                Customer Information
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-gray-500">Customer Name</p>
-                  <p className="text-sm font-medium text-gray-900">{receiptPayment.customerName || 'Cash Customer'}</p>
-                </div>
-                {receiptPayment.invoiceNo && (
-                  <div>
-                    <p className="text-xs text-gray-500">Invoice Number</p>
-                    <p className="text-sm font-medium text-gray-900">{receiptPayment.invoiceNo}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Payment Details */}
-            <div className="border rounded-lg overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  <tr>
-                    <td className="px-4 py-3 text-sm text-gray-900">
-                      Payment received via {receiptPayment.method}
-                      {receiptPayment.ref && <span className="text-gray-500"> - Ref: {receiptPayment.ref}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900 text-right">
-                      {formatCurrency(receiptPayment.amount)}
-                    </td>
-                  </tr>
-                  <tr className="bg-gray-50">
-                    <td className="px-4 py-3 text-sm font-bold text-gray-900">Total Amount</td>
-                    <td className="px-4 py-3 text-sm font-bold text-gray-900 text-right">
-                      {formatCurrency(receiptPayment.amount)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Payment Status */}
-            <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg">
-              <div>
-                <p className="text-xs text-gray-500">Payment Status</p>
-                <p className="text-sm font-medium text-gray-900">
-                  {receiptPayment.method === 'Cheque' ? (receiptPayment.chequeStatus || 'Pending') : 'Completed'}
-                </p>
-              </div>
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => handleDownloadReceipt(receiptPayment)}
-                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Receipt
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+      />
     </div>
   )
 }

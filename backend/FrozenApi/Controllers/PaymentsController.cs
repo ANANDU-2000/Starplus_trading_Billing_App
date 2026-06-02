@@ -474,14 +474,41 @@ namespace FrozenApi.Controllers
         }
 
         [HttpGet("receipt/{receiptId}/pdf")]
+        [AllowAnonymous]
         public async Task<IActionResult> GetReceiptPdf(int receiptId)
         {
             try
             {
+                var dto = await _receiptService.GetReceiptByIdAsync(receiptId);
+                if (dto == null)
+                    return NotFound(new ApiResponse<object> { Success = false, Message = "Receipt not found." });
+
                 var bytes = await _receiptService.GetReceiptPdfAsync(receiptId);
                 if (bytes == null || bytes.Length == 0)
                     return StatusCode(500, new ApiResponse<object> { Success = false, Message = "Receipt not found or could not be generated." });
-                return File(bytes, "text/html", $"Receipt-{receiptId}.html");
+
+                var safeNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
+                    ? receiptId.ToString()
+                    : dto.ReceiptNumber.Replace("\"", "'");
+                var filename = $"Receipt-{safeNumber}.pdf";
+
+                var wantsInline = Request.Query.ContainsKey("print")
+                    || Request.Query.ContainsKey("open")
+                    || Request.Headers["Accept"].ToString().Contains("application/pdf", StringComparison.OrdinalIgnoreCase);
+                var disposition = wantsInline ? "inline" : "attachment";
+
+                Response.ContentType = "application/pdf";
+                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                Response.Headers["Cache-Control"] = wantsInline
+                    ? "no-store, no-cache, must-revalidate, max-age=0"
+                    : "private, max-age=60";
+                Response.Headers["Pragma"] = wantsInline ? "no-cache" : "private";
+                Response.Headers["Expires"] = "0";
+
+                return wantsInline
+                    ? File(bytes, "application/pdf")
+                    : File(bytes, "application/pdf", filename);
             }
             catch (Exception ex)
             {

@@ -1,82 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { X, Download, Printer } from 'lucide-react'
 import { paymentsAPI } from '../services'
 import toast from 'react-hot-toast'
-import { validateHtmlReceiptBlob } from '../utils/pdfBlob'
 import {
-  triggerBlobDownload,
-  tryOpenBlobInNewTab,
-  isIOSDevice,
-  isLikelyMobileBrowser
-} from '../utils/blobDownload'
-
-/**
- * Fallback print: full-viewport invisible iframe (0×0 hidden iframes often print blank on tablets/Safari).
- */
-function printHtmlInOffscreenIframe (html) {
-  const iframe = document.createElement('iframe')
-  iframe.setAttribute('aria-hidden', 'true')
-  iframe.style.cssText =
-    'position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0;pointer-events:none;z-index:2147483646'
-  document.body.appendChild(iframe)
-
-  const win = iframe.contentWindow
-  const doc = iframe.contentDocument || win.document
-  doc.open()
-  doc.write(html)
-  doc.close()
-
-  const cleanup = () => {
-    try {
-      if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  let fallbackTimer = null
-  const onAfterPrint = () => {
-    if (fallbackTimer != null) clearTimeout(fallbackTimer)
-    win.removeEventListener('afterprint', onAfterPrint)
-    cleanup()
-  }
-
-  fallbackTimer = setTimeout(() => {
-    win.removeEventListener('afterprint', onAfterPrint)
-    cleanup()
-  }, 10 * 60 * 1000)
-
-  win.addEventListener('afterprint', onAfterPrint)
-
-  const runPrint = () => {
-    try {
-      win.focus()
-      win.print()
-    } catch (e) {
-      console.error('Print failed:', e)
-      toast.error('Print failed. Try Download and open the file instead.')
-      if (fallbackTimer != null) clearTimeout(fallbackTimer)
-      win.removeEventListener('afterprint', onAfterPrint)
-      cleanup()
-    }
-  }
-
-  requestAnimationFrame(() => {
-    setTimeout(runPrint, 150)
-  })
-}
+  downloadReceiptPdf,
+  openReceiptPdfForPrint,
+  receiptPdfUrl
+} from '../utils/invoicePdfActions'
+import { formatCurrency } from '../utils/currency'
 
 export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose }) {
   const [loading, setLoading] = useState(false)
   const [receipt, setReceipt] = useState(null)
-  const [receiptHtml, setReceiptHtml] = useState(null)
   const [error, setError] = useState(null)
-  const previewIframeRef = useRef(null)
 
   useEffect(() => {
     if (!isOpen || !paymentIds?.length) {
       setReceipt(null)
-      setReceiptHtml(null)
       setError(null)
       return
     }
@@ -94,14 +34,6 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
         const receiptId = data?.id ?? data?.Id
         if (receiptId == null) throw new Error('Invalid receipt response')
         setReceipt(data)
-        const pdfRes = await paymentsAPI.getReceiptPdf(receiptId)
-        if (cancelled) return
-        const blob = pdfRes instanceof Blob ? pdfRes : new Blob([pdfRes])
-        const check = await validateHtmlReceiptBlob(blob)
-        if (!check.ok) {
-          throw new Error(check.message)
-        }
-        setReceiptHtml(check.html)
       } catch (err) {
         if (!cancelled) {
           const status = err?.response?.status
@@ -121,67 +53,26 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
     return () => { cancelled = true }
   }, [isOpen, paymentIds?.join(',')])
 
-  const handleDownload = () => {
-    if (!receiptHtml) {
+  const receiptId = receipt?.id ?? receipt?.Id
+  const previewUrl = useMemo(() => {
+    if (!receiptId) return null
+    return receiptPdfUrl(receiptId, { open: true })
+  }, [receiptId])
+
+  const handleDownload = async () => {
+    if (!receiptId) {
       toast.error('Nothing to download yet')
       return
     }
-    const safeName = String(receipt?.receiptNumber || receipt?.id || 'receipt').replace(/[/\\?%*:|"<>]/g, '-')
-    const blob = new Blob([receiptHtml], { type: 'text/html;charset=utf-8' })
-    try {
-      if (isIOSDevice() || isLikelyMobileBrowser()) {
-        if (tryOpenBlobInNewTab(blob)) {
-          toast.success('Opened in a new tab — use Share (iOS) or menu Save as… to keep the file')
-          return
-        }
-        // Pop-up blocked — fall through to programmatic download
-      }
-      triggerBlobDownload(blob, `Receipt-${safeName}.html`)
-      toast.success('Download started — check your downloads folder')
-    } catch (e) {
-      console.error(e)
-      if (tryOpenBlobInNewTab(blob)) {
-        toast.success('Opened in a new tab — save from the browser menu')
-      } else {
-        toast.error('Download failed — try Print or allow pop-ups for this site')
-      }
-    }
+    await downloadReceiptPdf(receiptId, receipt?.receiptNumber || receipt?.ReceiptNumber)
   }
 
   const handlePrint = () => {
-    if (!receiptHtml) {
+    if (!receiptId) {
       toast.error('Nothing to print yet')
       return
     }
-    const htmlBlob = new Blob([receiptHtml], { type: 'text/html;charset=utf-8' })
-    try {
-      // iOS/iPad Safari: iframe.print() is often broken; opening HTML in a new tab works with Share → Print
-      if (isIOSDevice()) {
-        if (tryOpenBlobInNewTab(htmlBlob)) {
-          toast.success('Use Share → Print in the new tab (or browser ⋯ menu)')
-          return
-        }
-      }
-      const previewWin = previewIframeRef.current?.contentWindow
-      if (previewWin) {
-        previewWin.focus()
-        previewWin.print()
-        return
-      }
-      printHtmlInOffscreenIframe(receiptHtml)
-    } catch (e) {
-      console.error(e)
-      try {
-        if (tryOpenBlobInNewTab(htmlBlob)) {
-          toast.success('Opened for printing in a new tab')
-          return
-        }
-        printHtmlInOffscreenIframe(receiptHtml)
-      } catch (e2) {
-        console.error(e2)
-        toast.error('Print failed — try Download, then open the file and print')
-      }
-    }
+    openReceiptPdfForPrint(receiptId)
   }
 
   if (!isOpen) return null
@@ -191,12 +82,14 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-lg font-bold">
-            Payment Receipt Preview
+            Payment Receipt
             {receipt?.receiptNumber && (
               <span className="ml-2 text-gray-600 font-normal">
                 {receipt.receiptNumber}
                 {paymentIds?.length > 1 && (
-                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Combined receipt for {paymentIds.length} payments</span>
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                    Combined receipt for {paymentIds.length} payments
+                  </span>
                 )}
                 {receipt.isReprint && (
                   <span className="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Reprint</span>
@@ -222,34 +115,54 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
           {error && (
             <div className="text-red-600 p-4">{error}</div>
           )}
-          {!loading && !error && receiptHtml && (
-            <iframe
-              ref={previewIframeRef}
-              id="receipt-preview-iframe"
-              title="Receipt"
-              srcDoc={receiptHtml}
-              className="w-full h-[60vh] border rounded bg-white"
-            />
+          {!loading && !error && receipt && (
+            <div className="space-y-4 h-full flex flex-col">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div className="bg-gray-50 rounded p-3">
+                  <div className="text-gray-500">Customer</div>
+                  <div className="font-medium">{receipt.customerName || receipt.CustomerName || 'N/A'}</div>
+                </div>
+                <div className="bg-gray-50 rounded p-3">
+                  <div className="text-gray-500">Total Paid</div>
+                  <div className="font-medium">{formatCurrency(receipt.totalAmount ?? receipt.TotalAmount ?? 0)}</div>
+                </div>
+                <div className="bg-gray-50 rounded p-3">
+                  <div className="text-gray-500">Date</div>
+                  <div className="font-medium">
+                    {receipt.generatedAt
+                      ? new Date(receipt.generatedAt).toLocaleDateString('en-GB')
+                      : new Date().toLocaleDateString('en-GB')}
+                  </div>
+                </div>
+              </div>
+              {previewUrl && (
+                <iframe
+                  title="Receipt PDF Preview"
+                  src={previewUrl}
+                  className="w-full flex-1 min-h-[50vh] border rounded bg-white"
+                />
+              )}
+            </div>
           )}
         </div>
         <div className="flex gap-2 p-4 border-t bg-gray-50">
           <button
             type="button"
             onClick={handleDownload}
-            disabled={!receiptHtml}
+            disabled={!receiptId}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4" />
-            Download
+            Download PDF
           </button>
           <button
             type="button"
             onClick={handlePrint}
-            disabled={!receiptHtml}
+            disabled={!receiptId}
             className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Printer className="h-4 w-4" />
-            Print
+            Print PDF
           </button>
           <button
             type="button"
