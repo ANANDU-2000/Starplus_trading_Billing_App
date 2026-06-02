@@ -9,13 +9,38 @@ function safeInvoiceName (saleId, invoiceNo) {
   return `INV-${String(invoiceNo || saleId || 'invoice').replace(/[^\w.-]+/g, '_')}.pdf`
 }
 
-export function invoicePdfUrl (saleId, { print = false, format, width } = {}) {
+function isStandalonePwaMode () {
+  try {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
+  } catch {
+    return false
+  }
+}
+
+export function invoicePdfUrl (saleId, { print = false, open = false, format, width } = {}) {
   const params = new URLSearchParams()
   if (print) params.set('print', '1')
+  if (open) params.set('open', '1')
   if (format) params.set('format', format)
   if (width) params.set('width', width)
   params.set('_', Date.now().toString())
   return `${API_BASE_URL}/sales/${saleId}/pdf?${params.toString()}`
+}
+
+function openPdfWithFallback (url, { forPrint = false } = {}) {
+  const inPwa = isStandalonePwaMode()
+  console.debug(`[invoice-pdf] open attempt: forPrint=${forPrint}, pwa=${inPwa}, url=${url}`)
+
+  const popup = window.open(url, '_blank', 'noopener,noreferrer')
+  if (popup) {
+    console.debug('[invoice-pdf] open strategy: new-tab')
+    return 'new-tab'
+  }
+
+  // Installed PWA/webview can block new tabs. Same-tab is more reliable there.
+  window.location.assign(url)
+  console.debug('[invoice-pdf] open strategy: same-tab-fallback')
+  return 'same-tab'
 }
 
 export function openInvoicePdfForPrint (saleId, { format, width } = {}) {
@@ -24,9 +49,9 @@ export function openInvoicePdfForPrint (saleId, { format, width } = {}) {
     return false
   }
 
-  const printUrl = invoicePdfUrl(saleId, { print: true, format, width })
-  const printWindow = window.open(printUrl, '_blank', 'noopener,noreferrer')
-  if (printWindow) {
+  const printUrl = invoicePdfUrl(saleId, { print: true, open: true, format, width })
+  const method = openPdfWithFallback(printUrl, { forPrint: true })
+  if (method === 'new-tab') {
     toast.success(
       isIOSDevice()
         ? 'Invoice opened. Tap Share, then Print.'
@@ -35,8 +60,7 @@ export function openInvoicePdfForPrint (saleId, { format, width } = {}) {
     return true
   }
 
-  window.location.assign(printUrl)
-  toast('Pop-up blocked. Opened invoice in this tab for printing.', { icon: 'i', duration: 5000 })
+  toast('Opened invoice in this tab for printing. Use browser print, then go back to app.', { icon: 'i', duration: 5500 })
   return true
 }
 
@@ -46,11 +70,10 @@ export function openInvoicePdfForViewing (saleId) {
     return false
   }
 
-  const url = invoicePdfUrl(saleId, { print: true })
-  const popup = window.open(url, '_blank', 'noopener,noreferrer')
-  if (!popup) {
-    window.location.assign(url)
-    toast('Pop-up blocked. Opened invoice in this tab.', { icon: 'i', duration: 4000 })
+  const url = invoicePdfUrl(saleId, { open: true })
+  const method = openPdfWithFallback(url, { forPrint: false })
+  if (method === 'same-tab') {
+    toast('Opened invoice in this tab. Use browser menu to print or save, then go back.', { icon: 'i', duration: 5500 })
   }
   return true
 }

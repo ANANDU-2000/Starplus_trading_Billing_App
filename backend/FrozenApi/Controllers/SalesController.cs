@@ -313,13 +313,24 @@ namespace FrozenApi.Controllers
                 
                 var filename = sale != null ? $"INV-{sale.InvoiceNo}.pdf" : $"invoice_{id}.pdf";
                 
-                // Check if it's for printing (inline) or download (attachment)
-                var isPrint = Request.Query.ContainsKey("print") || Request.Headers["Accept"].ToString().Contains("application/pdf");
-                var disposition = isPrint ? "inline" : "attachment";
-                
-                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
+                // Inline mode for print/open-in-tab flows used by web + tablet PWA.
+                var wantsInline = Request.Query.ContainsKey("print")
+                    || Request.Query.ContainsKey("open")
+                    || Request.Headers["Accept"].ToString().Contains("application/pdf", StringComparison.OrdinalIgnoreCase);
+                var disposition = wantsInline ? "inline" : "attachment";
+
+                Console.WriteLine($"📄 PDF Response: invoice={id}, inline={wantsInline}, disposition={disposition}, filename={filename}");
+
                 Response.ContentType = "application/pdf";
-                return isPrint
+                Response.Headers["Content-Disposition"] = $"{disposition}; filename=\"{filename}\"";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                Response.Headers["Cache-Control"] = wantsInline
+                    ? "no-store, no-cache, must-revalidate, max-age=0"
+                    : "private, max-age=60";
+                Response.Headers["Pragma"] = wantsInline ? "no-cache" : "private";
+                Response.Headers["Expires"] = "0";
+
+                return wantsInline
                     ? File(pdfBytes, "application/pdf")
                     : File(pdfBytes, "application/pdf", filename);
             }
