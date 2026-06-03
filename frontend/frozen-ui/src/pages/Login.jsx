@@ -175,6 +175,9 @@ const Login = () => {
         {/* Footer */}
         <div className="text-center text-sm text-gray-500">
           <p>© 2024 STAR PLUS FOODSTUFF TRADING. All rights reserved.</p>
+          {import.meta.env.VITE_APP_BUILD && (
+            <p className="text-xs text-gray-400 mt-1">App build {import.meta.env.VITE_APP_BUILD}</p>
+          )}
         </div>
       </div>
     </div>

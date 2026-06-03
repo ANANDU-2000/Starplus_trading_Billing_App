@@ -18,6 +18,7 @@ import BackupPage from './pages/BackupPage'
 import Layout from './components/Layout'
 import ConnectionStatus from './components/ConnectionStatus'
 import ErrorBoundary from './components/ErrorBoundary'
+import PdfDocumentModal from './components/PdfDocumentModal'
 
 function App() {
   const { user, loading } = useAuth()
@@ -31,12 +32,18 @@ function App() {
   }
 
   if (!user) {
-    return <Login />
+    return (
+      <>
+        <Login />
+        <PdfDocumentModal />
+      </>
+    )
   }
 
   return (
     <ErrorBoundary>
       <ConnectionStatus />
+      <PdfDocumentModal />
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         {/* Dashboard has its own layout */}

@@ -39,39 +39,10 @@ export function openPdfBlobInViewer (blob, { revokeDelayMs = 120_000 } = {}) {
   return 'same-tab'
 }
 
-/**
- * iOS Safari (and some Android browsers) often ignore `download` on `<a>` for blobs.
- * Opens the blob in a new tab so the user can Share → Save / Print to PDF.
- */
 export function tryOpenBlobInNewTab (blob, { revokeDelayMs = 120_000 } = {}) {
   if (!blob || blob.size === 0) return false
   const result = openPdfBlobInViewer(blob, { revokeDelayMs })
   return result === 'new-tab'
-}
-
-/**
- * Tablet/PWA: save via system share sheet (Files/Downloads) when supported.
- */
-export async function shareOrSavePdfBlob (blob, filename) {
-  const typed = blob.type === 'application/pdf'
-    ? blob
-    : new Blob([blob], { type: 'application/pdf' })
-  const file = new File([typed], filename, { type: 'application/pdf' })
-
-  if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: filename })
-      return 'share'
-    } catch (err) {
-      if (err?.name === 'AbortError') return 'cancelled'
-    }
-  }
-
-  const opened = openPdfBlobInViewer(typed)
-  if (opened) return opened
-
-  triggerBlobDownload(typed, filename)
-  return 'download'
 }
 
 export function isIOSDevice () {
@@ -95,6 +66,133 @@ export function isStandalonePwaMode () {
   }
 }
 
+export function isTouchOrTabletDevice () {
+  if (typeof navigator === 'undefined') return false
+  try {
+    if (isLikelyMobileBrowser() || isStandalonePwaMode()) return true
+    if (navigator.maxTouchPoints > 0) return true
+    if (window.matchMedia('(pointer: coarse)').matches) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
 export function needsBlobPdfFlow () {
-  return isLikelyMobileBrowser() || isStandalonePwaMode()
+  return isTouchOrTabletDevice()
+}
+
+function toPdfBlob (blob) {
+  return blob.type === 'application/pdf'
+    ? blob
+    : new Blob([blob], { type: 'application/pdf' })
+}
+
+/**
+ * Save PDF on Honor/Android/PWA: Share → File picker → open tab fallback.
+ * @returns {'share'|'picker'|'tab'|'download'|'cancelled'}
+ */
+export async function savePdfToDevice (blob, filename) {
+  const typed = toPdfBlob(blob)
+  const file = new File([typed], filename, { type: 'application/pdf' })
+
+  if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename })
+      return 'share'
+    } catch (err) {
+      if (err?.name === 'AbortError') return 'cancelled'
+    }
+  }
+
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: 'PDF',
+          accept: { 'application/pdf': ['.pdf'] }
+        }]
+      })
+      const writable = await handle.createWritable()
+      await writable.write(typed)
+      await writable.close()
+      return 'picker'
+    } catch (err) {
+      if (err?.name === 'AbortError') return 'cancelled'
+    }
+  }
+
+  if (needsBlobPdfFlow()) {
+    const opened = openPdfBlobInViewer(typed)
+    if (opened) return 'tab'
+    return 'tab'
+  }
+
+  triggerBlobDownload(typed, filename)
+  return 'download'
+}
+
+/**
+ * Tablet/PWA: save via system share sheet (Files/Downloads) when supported.
+ */
+export async function shareOrSavePdfBlob (blob, filename) {
+  return savePdfToDevice(blob, filename)
+}
+
+/**
+ * Print PDF via hidden iframe (works on Android Chrome / Honor browser).
+ */
+export function printPdfBlob (blob) {
+  return new Promise((resolve) => {
+    if (!blob || blob.size === 0) {
+      resolve(false)
+      return
+    }
+    const typed = toPdfBlob(blob)
+    const url = URL.createObjectURL(typed)
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    iframe.title = 'print-pdf'
+
+    const cleanup = () => {
+      setTimeout(() => {
+        URL.revokeObjectURL(url)
+        iframe.remove()
+      }, 1000)
+    }
+
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow?.focus()
+        iframe.contentWindow?.print()
+        resolve(true)
+      } catch {
+        openPdfBlobInViewer(typed)
+        resolve(false)
+      } finally {
+        cleanup()
+      }
+    }
+
+    iframe.onerror = () => {
+      cleanup()
+      resolve(false)
+    }
+
+    document.body.appendChild(iframe)
+    iframe.src = url
+
+    setTimeout(() => {
+      if (iframe.parentNode) {
+        try {
+          iframe.contentWindow?.print()
+          resolve(true)
+        } catch {
+          resolve(false)
+        }
+        cleanup()
+      }
+    }, 3000)
+  })
 }

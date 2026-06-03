@@ -38,7 +38,17 @@ import toast from 'react-hot-toast'
 import PaymentModal from '../components/PaymentModal'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
 import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
-import { openInvoicePdfForViewing, openStatementPdfForPrint, downloadStatementPdf, openPendingBillsPdfForPrint, downloadPendingBillsPdf } from '../utils/invoicePdfActions'
+import {
+  openInvoicePdfForViewing,
+  openInvoicePdfForPrint,
+  downloadInvoicePdf,
+  openStatementPdfForPrint,
+  downloadStatementPdf,
+  openPendingBillsPdfForPrint,
+  downloadPendingBillsPdf,
+  openReceiptPdfForPrint,
+  downloadReceiptPdf
+} from '../utils/invoicePdfActions'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
@@ -1148,7 +1158,12 @@ const CustomerLedgerPage = () => {
       toast.error('Please select a customer first')
       return
     }
-    openStatementPdfForPrint(selectedCustomer.id, dateRange.from, dateRange.to)
+    openStatementPdfForPrint(
+      selectedCustomer.id,
+      dateRange.from,
+      dateRange.to,
+      selectedCustomer.name
+    )
   }
 
   const handleDownloadStatementPDF = async () => {
@@ -1179,7 +1194,12 @@ const CustomerLedgerPage = () => {
       toast.error('Please select a customer first')
       return
     }
-    openPendingBillsPdfForPrint(selectedCustomer.id, dateRange.from, dateRange.to)
+    openPendingBillsPdfForPrint(
+      selectedCustomer.id,
+      dateRange.from,
+      dateRange.to,
+      selectedCustomer.name
+    )
   }
 
   const handleDownloadPendingBillsPDF = async () => {
@@ -1528,17 +1548,31 @@ const CustomerLedgerPage = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={handlePrintStatementPDF}
+                          onClick={handleDownloadStatementPDF}
                           disabled={pdfLoading}
                           className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-800 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Print Full Ledger PDF (F7)"
+                          title="Download ledger statement PDF"
                         >
                           {pdfLoading ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : (
                             <Download className="h-3 w-3" />
                           )}
-                          <span className="hidden lg:inline">PDF</span>
+                          <span className="hidden lg:inline">Download</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePrintStatementPDF}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-blue-700 text-white text-xs rounded hover:bg-blue-800 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Print ledger statement PDF (F7)"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Printer className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Print</span>
                         </button>
                       </>
                     )}
@@ -1651,12 +1685,17 @@ const CustomerLedgerPage = () => {
                         setSelectedInvoiceForView(invoiceId)
                         setShowInvoiceModal(true)
                       }}
-                      onViewPDF={async (invoiceId) => {
-                        try {
-                          openInvoicePdfForViewing(invoiceId)
-                        } catch (error) {
-                          toast.error(error?.message || 'Failed to generate PDF')
-                        }
+                      onViewPDF={(invoiceId) => {
+                        const inv = customerInvoices.find(i => i.id === invoiceId)
+                        openInvoicePdfForViewing(invoiceId, inv?.invoiceNo)
+                      }}
+                      onDownloadPDF={(invoiceId) => {
+                        const inv = customerInvoices.find(i => i.id === invoiceId)
+                        downloadInvoicePdf(invoiceId, inv?.invoiceNo)
+                      }}
+                      onPrintPDF={(invoiceId) => {
+                        const inv = customerInvoices.find(i => i.id === invoiceId)
+                        openInvoicePdfForPrint(invoiceId, inv?.invoiceNo)
                       }}
                       onEditInvoice={(invoiceId) => {
                         // Navigate to POS with edit mode using React Router
@@ -1728,6 +1767,28 @@ const CustomerLedgerPage = () => {
                         setShowReceiptModal(true)
                       }}
                       onGenerateReceipt={() => setShowReceiptModal(true)}
+                      onDownloadReceiptPdf={async (payment) => {
+                        try {
+                          const res = await paymentsAPI.generateReceipt(payment.id)
+                          const data = res?.data ?? res
+                          const receiptId = data?.id ?? data?.Id
+                          if (receiptId == null) throw new Error('Invalid receipt')
+                          downloadReceiptPdf(receiptId, data?.receiptNumber || data?.ReceiptNumber)
+                        } catch (e) {
+                          toast.error(e?.message || 'Failed to download receipt PDF')
+                        }
+                      }}
+                      onPrintReceiptPdf={async (payment) => {
+                        try {
+                          const res = await paymentsAPI.generateReceipt(payment.id)
+                          const data = res?.data ?? res
+                          const receiptId = data?.id ?? data?.Id
+                          if (receiptId == null) throw new Error('Invalid receipt')
+                          openReceiptPdfForPrint(receiptId, data?.receiptNumber || data?.ReceiptNumber)
+                        } catch (e) {
+                          toast.error(e?.message || 'Failed to print receipt PDF')
+                        }
+                      }}
                       onSelectAll={(checked) => setSelectedPaymentIds(checked ? customerPayments.map(p => p.id) : [])}
                       onEditPayment={async (payment) => {
                         // Handle edit payment
@@ -2376,7 +2437,7 @@ const LedgerStatementTab = ({
 }
 
 // Invoices Tab Component
-const InvoicesTab = ({ invoices, outstandingInvoices, user, onViewInvoice, onViewPDF, onEditInvoice, onPayInvoice, onUnlockInvoice, onDeleteInvoice }) => {
+const InvoicesTab = ({ invoices, outstandingInvoices, user, onViewInvoice, onViewPDF, onDownloadPDF, onPrintPDF, onEditInvoice, onPayInvoice, onUnlockInvoice, onDeleteInvoice }) => {
   const isAdmin = user?.role?.toLowerCase() === 'admin'
   const canEdit = user?.role?.toLowerCase() === 'admin' // Only admins can edit
   const getStatusColor = (status) => {
@@ -2515,10 +2576,28 @@ const InvoicesTab = ({ invoices, outstandingInvoices, user, onViewInvoice, onVie
                           <button
                             onClick={() => onViewPDF(invoice.id)}
                             className="text-green-600 hover:text-green-900 hover:bg-green-50 p-1 rounded transition-colors"
-                            title="PDF"
+                            title="View PDF"
                           >
                             <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                           </button>
+                          {onDownloadPDF && (
+                            <button
+                              onClick={() => onDownloadPDF(invoice.id)}
+                              className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 p-1 rounded transition-colors"
+                              title="Download PDF to device"
+                            >
+                              <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
+                          {onPrintPDF && (
+                            <button
+                              onClick={() => onPrintPDF(invoice.id)}
+                              className="text-gray-700 hover:text-gray-900 hover:bg-gray-50 p-1 rounded transition-colors"
+                              title="Print PDF"
+                            >
+                              <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2549,7 +2628,7 @@ const InvoicesTab = ({ invoices, outstandingInvoices, user, onViewInvoice, onVie
 }
 
 // Payments Tab Component
-const PaymentsTab = ({ payments, user, selectedPaymentIds = [], onTogglePayment, onSelectAll, onClearSelection, onViewReceipt, onGenerateReceipt, onEditPayment, onDeletePayment }) => {
+const PaymentsTab = ({ payments, user, selectedPaymentIds = [], onTogglePayment, onSelectAll, onClearSelection, onViewReceipt, onGenerateReceipt, onDownloadReceiptPdf, onPrintReceiptPdf, onEditPayment, onDeletePayment }) => {
   const isAdmin = user?.role?.toLowerCase() === 'admin'
   const selectedTotal = payments
     .filter(p => selectedPaymentIds.includes(p.id))
@@ -2651,10 +2730,30 @@ const PaymentsTab = ({ payments, user, selectedPaymentIds = [], onTogglePayment,
                         <button
                           onClick={() => onViewReceipt(payment.id)}
                           className="text-blue-600 hover:text-blue-900 p-1 rounded transition-colors"
-                          title="Generate Receipt"
+                          title="View / generate receipt"
                         >
-                          <Printer className="h-4 w-4" />
+                          <FileText className="h-4 w-4" />
                         </button>
+                        {onDownloadReceiptPdf && (
+                          <button
+                            type="button"
+                            onClick={() => onDownloadReceiptPdf(payment)}
+                            className="text-green-600 hover:text-green-900 p-1 rounded transition-colors"
+                            title="Download receipt PDF"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                        )}
+                        {onPrintReceiptPdf && (
+                          <button
+                            type="button"
+                            onClick={() => onPrintReceiptPdf(payment)}
+                            className="text-gray-700 hover:text-gray-900 p-1 rounded transition-colors"
+                            title="Print receipt PDF"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </button>
+                        )}
                         {isAdmin && onEditPayment && (
                           <button
                             onClick={() => onEditPayment(payment)}

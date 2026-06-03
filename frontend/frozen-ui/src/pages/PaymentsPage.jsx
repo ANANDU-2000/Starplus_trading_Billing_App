@@ -400,8 +400,8 @@ const PaymentsPage = () => {
 
   const handlePrintReceipt = async (payment) => {
     try {
-      const { receiptId } = await ensureReceiptId(payment)
-      await openReceiptPdfForPrint(receiptId)
+      const { receiptId, receiptNumber } = await ensureReceiptId(payment)
+      openReceiptPdfForPrint(receiptId, receiptNumber)
     } catch (error) {
       console.error('Failed to print receipt:', error)
       toast.error(await parseApiErrorBlobMessage(error, 'Failed to print receipt'))
@@ -411,7 +411,7 @@ const PaymentsPage = () => {
   const handleDownloadReceipt = async (payment) => {
     try {
       const { receiptId, receiptNumber } = await ensureReceiptId(payment)
-      await downloadReceiptPdf(receiptId, receiptNumber)
+      downloadReceiptPdf(receiptId, receiptNumber)
     } catch (error) {
       console.error('Failed to download receipt:', error)
       toast.error(await parseApiErrorBlobMessage(error, 'Failed to download receipt'))

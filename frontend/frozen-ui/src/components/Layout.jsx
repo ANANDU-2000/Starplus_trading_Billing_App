@@ -229,6 +229,11 @@ const Layout = () => {
         <div className="lg:hidden">
           <BottomNav />
         </div>
+        {import.meta.env.VITE_APP_BUILD && (
+          <p className="hidden lg:block fixed bottom-1 left-2 text-[10px] text-gray-400 z-10">
+            Build {import.meta.env.VITE_APP_BUILD}
+          </p>
+        )}
       </div>
     </div>
   )

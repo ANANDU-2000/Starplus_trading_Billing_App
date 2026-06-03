@@ -1,12 +1,7 @@
 import toast from 'react-hot-toast'
 import { salesAPI, paymentsAPI, customersAPI } from '../services'
-import {
-  triggerBlobDownload,
-  openPdfBlobInViewer,
-  shareOrSavePdfBlob,
-  isIOSDevice,
-  needsBlobPdfFlow
-} from './blobDownload'
+import { usePdfDocumentStore } from '../stores/pdfDocumentStore'
+import { isStandalonePwaMode as checkStandalonePwa } from './blobDownload'
 import { parseApiErrorBlobMessage, validatePdfBlob } from './pdfBlob'
 
 const recentOpenByKey = new Map()
@@ -28,243 +23,192 @@ function safeStatementName (customerName, suffix = 'statement') {
 function shouldDebounce (key) {
   const now = Date.now()
   const last = recentOpenByKey.get(key) || 0
-  if (now - last < DEBOUNCE_MS) {
-    return true
-  }
+  if (now - last < DEBOUNCE_MS) return true
   recentOpenByKey.set(key, now)
   return false
 }
 
-async function fetchValidatedPdf (fetchFn) {
-  const response = await fetchFn()
-  const raw = response instanceof Blob ? response : new Blob([response])
-  const check = await validatePdfBlob(raw)
-  if (!check.ok) {
-    throw new Error(check.message || 'Server did not return a valid PDF')
-  }
-  return new Blob([check.blob], { type: 'application/pdf' })
-}
-
-/**
- * Always use authenticated axios fetch + blob URL — reliable on tablet/PWA/Huawei
- * (window.open to API URL often shows HTML/JSON preview or wrong app handler).
- */
-async function openPdfFromFetch (fetchFn, { debounceKey, toastId = 'pdf-open', forPrint = false } = {}) {
-  if (debounceKey && shouldDebounce(debounceKey)) {
+function openPdfDocument ({ title, filename, fetchPdf, mode = 'view', debounceKey }) {
+  if (debounceKey && shouldDebounce(debounceKey)) return false
+  if (!fetchPdf) {
+    toast.error('Cannot open PDF')
     return false
   }
-
-  try {
-    toast.loading(forPrint ? 'Preparing PDF for print...' : 'Opening PDF...', { id: toastId })
-    const blob = await fetchValidatedPdf(fetchFn)
-    const method = openPdfBlobInViewer(blob)
-    toast.dismiss(toastId)
-
-    if (method === 'new-tab') {
-      toast.success(
-        forPrint
-          ? (isIOSDevice()
-              ? 'PDF opened. Tap Share → Print or Save to Files.'
-              : 'PDF opened. Use menu to Print or Save.')
-          : (isIOSDevice()
-              ? 'PDF opened. Tap Share to save or print.'
-              : 'PDF opened in new tab.')
-      )
-      return true
-    }
-
-    toast('PDF opened in this tab. Use browser menu to print or save, then go back.', {
-      icon: 'i',
-      duration: 5500
-    })
-    return true
-  } catch (error) {
-    console.error('[pdf-open] failed:', error)
-    toast.dismiss(toastId)
-    const msg = await parseApiErrorBlobMessage(error, 'Failed to open PDF')
-    toast.error(msg)
-    return false
-  }
-}
-
-async function downloadPdfFromFetch (fetchFn, filename, { toastId = 'pdf-download' } = {}) {
-  try {
-    toast.loading('Preparing PDF...', { id: toastId })
-    const blob = await fetchValidatedPdf(fetchFn)
-    toast.dismiss(toastId)
-
-    if (needsBlobPdfFlow()) {
-      const result = await shareOrSavePdfBlob(blob, filename)
-      if (result === 'cancelled') return false
-      if (result === 'share') {
-        toast.success('Use Save to Files or Print from the share menu')
-        return true
-      }
-      toast.success(
-        isIOSDevice()
-          ? 'PDF opened. Tap Share → Save to Files.'
-          : 'PDF opened. Use ⋮ menu → Download or Print.'
-      )
-      return true
-    }
-
-    triggerBlobDownload(blob, filename)
-    toast.success('Download started — check your downloads folder')
-    return true
-  } catch (error) {
-    console.error('[pdf-download] failed:', error)
-    toast.dismiss(toastId)
-    const msg = await parseApiErrorBlobMessage(error, 'Failed to download PDF')
-    toast.error(msg)
-    return false
-  }
-}
-
-/** Load PDF as blob URL for iframe preview (authenticated). */
-export async function loadPdfBlobUrl (fetchFn) {
-  const blob = await fetchValidatedPdf(fetchFn)
-  return URL.createObjectURL(blob)
+  usePdfDocumentStore.getState().openPdfDocument({
+    title,
+    filename,
+    fetchPdf,
+    mode,
+    autoPrint: mode === 'print',
+    autoSave: mode === 'download'
+  })
+  return true
 }
 
 // --- Invoice (sale) ---
 
-export async function openInvoicePdfForPrint (saleId) {
+export function openInvoicePdfForPrint (saleId, invoiceNo) {
   if (!saleId) {
     toast.error('Invalid sale ID. Cannot print invoice.')
     return false
   }
-  return openPdfFromFetch(
-    () => salesAPI.getInvoicePdf(saleId),
-    { debounceKey: `print:invoice:${saleId}`, forPrint: true }
-  )
+  return openPdfDocument({
+    title: `Invoice ${invoiceNo || saleId}`,
+    filename: safeInvoiceName(saleId, invoiceNo),
+    fetchPdf: () => salesAPI.getInvoicePdf(saleId),
+    mode: 'print',
+    debounceKey: `print:invoice:${saleId}`
+  })
 }
 
-export async function openInvoicePdfForViewing (saleId) {
+export function openInvoicePdfForViewing (saleId, invoiceNo) {
   if (!saleId) {
     toast.error('Invalid sale ID. Cannot open invoice.')
     return false
   }
-  return openPdfFromFetch(
-    () => salesAPI.getInvoicePdf(saleId),
-    { debounceKey: `view:invoice:${saleId}`, toastId: 'pdf-view' }
-  )
+  return openPdfDocument({
+    title: `Invoice ${invoiceNo || saleId}`,
+    filename: safeInvoiceName(saleId, invoiceNo),
+    fetchPdf: () => salesAPI.getInvoicePdf(saleId),
+    mode: 'view',
+    debounceKey: `view:invoice:${saleId}`
+  })
 }
 
-export async function downloadInvoicePdf (saleId, invoiceNo, { toastId = 'invoice-pdf-download' } = {}) {
+export function downloadInvoicePdf (saleId, invoiceNo) {
   if (!saleId) {
     toast.error('Invalid sale ID. Cannot download invoice.')
     return false
   }
-  return downloadPdfFromFetch(
-    () => salesAPI.getInvoicePdf(saleId),
-    safeInvoiceName(saleId, invoiceNo),
-    { toastId }
-  )
+  return openPdfDocument({
+    title: `Download — Invoice ${invoiceNo || saleId}`,
+    filename: safeInvoiceName(saleId, invoiceNo),
+    fetchPdf: () => salesAPI.getInvoicePdf(saleId),
+    mode: 'download',
+    debounceKey: `download:invoice:${saleId}`
+  })
 }
 
 // --- Payment receipt ---
 
-export async function openReceiptPdfForPrint (receiptId) {
+export function openReceiptPdfForPrint (receiptId, receiptNo) {
   if (!receiptId) {
     toast.error('Invalid receipt ID. Cannot print receipt.')
     return false
   }
-  return openPdfFromFetch(
-    () => paymentsAPI.getReceiptPdf(receiptId),
-    { debounceKey: `print:receipt:${receiptId}`, forPrint: true }
-  )
+  return openPdfDocument({
+    title: `Receipt ${receiptNo || receiptId}`,
+    filename: safeReceiptName(receiptId, receiptNo),
+    fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+    mode: 'print',
+    debounceKey: `print:receipt:${receiptId}`
+  })
 }
 
-export async function openReceiptPdfForViewing (receiptId) {
+export function openReceiptPdfForViewing (receiptId, receiptNo) {
   if (!receiptId) {
     toast.error('Invalid receipt ID. Cannot open receipt.')
     return false
   }
-  return openPdfFromFetch(
-    () => paymentsAPI.getReceiptPdf(receiptId),
-    { debounceKey: `view:receipt:${receiptId}`, toastId: 'pdf-view' }
-  )
+  return openPdfDocument({
+    title: `Receipt ${receiptNo || receiptId}`,
+    filename: safeReceiptName(receiptId, receiptNo),
+    fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+    mode: 'view',
+    debounceKey: `view:receipt:${receiptId}`
+  })
 }
 
-export async function downloadReceiptPdf (receiptId, receiptNo, { toastId = 'receipt-pdf-download' } = {}) {
+export function downloadReceiptPdf (receiptId, receiptNo) {
   if (!receiptId) {
     toast.error('Invalid receipt ID. Cannot download receipt.')
     return false
   }
-  return downloadPdfFromFetch(
-    () => paymentsAPI.getReceiptPdf(receiptId),
-    safeReceiptName(receiptId, receiptNo),
-    { toastId }
-  )
+  return openPdfDocument({
+    title: `Download — Receipt ${receiptNo || receiptId}`,
+    filename: safeReceiptName(receiptId, receiptNo),
+    fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+    mode: 'download',
+    debounceKey: `download:receipt:${receiptId}`
+  })
 }
 
 // --- Customer statement / pending bills ---
 
-export async function openStatementPdfForPrint (customerId, fromDate, toDate) {
+export function openStatementPdfForPrint (customerId, fromDate, toDate, customerName) {
   if (!customerId) {
     toast.error('Please select a customer first.')
     return false
   }
-  return openPdfFromFetch(
-    () => customersAPI.getCustomerStatement(
+  return openPdfDocument({
+    title: `Ledger Statement — ${customerName || 'Customer'}`,
+    filename: safeStatementName(customerName, 'statement'),
+    fetchPdf: () => customersAPI.getCustomerStatement(
       customerId,
       new Date(fromDate).toISOString(),
       new Date(toDate).toISOString()
     ),
-    { debounceKey: `print:statement:${customerId}:${fromDate}:${toDate}`, forPrint: true }
-  )
+    mode: 'print',
+    debounceKey: `print:statement:${customerId}:${fromDate}:${toDate}`
+  })
 }
 
-export async function openPendingBillsPdfForPrint (customerId, fromDate, toDate) {
+export function openPendingBillsPdfForPrint (customerId, fromDate, toDate, customerName) {
   if (!customerId) {
     toast.error('Please select a customer first.')
     return false
   }
-  return openPdfFromFetch(
-    () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
-    { debounceKey: `print:pending:${customerId}:${fromDate}:${toDate}`, forPrint: true }
-  )
+  return openPdfDocument({
+    title: `Pending Bills — ${customerName || 'Customer'}`,
+    filename: safeStatementName(customerName, 'pending_bills'),
+    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
+    mode: 'print',
+    debounceKey: `print:pending:${customerId}:${fromDate}:${toDate}`
+  })
 }
 
-export async function downloadStatementPdf (customerId, fromDate, toDate, customerName, { toastId = 'statement-pdf-download' } = {}) {
+export function downloadStatementPdf (customerId, fromDate, toDate, customerName) {
   if (!customerId) {
     toast.error('Please select a customer first.')
     return false
   }
-  return downloadPdfFromFetch(
-    () => customersAPI.getCustomerStatement(
+  return openPdfDocument({
+    title: `Download Statement — ${customerName || 'Customer'}`,
+    filename: safeStatementName(customerName, 'statement'),
+    fetchPdf: () => customersAPI.getCustomerStatement(
       customerId,
       new Date(fromDate).toISOString(),
       new Date(toDate).toISOString()
     ),
-    safeStatementName(customerName, 'statement'),
-    { toastId }
-  )
+    mode: 'download',
+    debounceKey: `download:statement:${customerId}:${fromDate}:${toDate}`
+  })
 }
 
-export async function downloadPendingBillsPdf (customerId, fromDate, toDate, customerName, { toastId = 'pending-pdf-download' } = {}) {
+export function downloadPendingBillsPdf (customerId, fromDate, toDate, customerName) {
   if (!customerId) {
     toast.error('Please select a customer first.')
     return false
   }
-  return downloadPdfFromFetch(
-    () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
-    safeStatementName(customerName, 'pending_bills'),
-    { toastId }
-  )
+  return openPdfDocument({
+    title: `Download Pending Bills — ${customerName || 'Customer'}`,
+    filename: safeStatementName(customerName, 'pending_bills'),
+    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
+    mode: 'download',
+    debounceKey: `download:pending:${customerId}:${fromDate}:${toDate}`
+  })
 }
 
-// Legacy URL builders kept for debugging only — do not use for open/print on devices
-export function invoicePdfUrl () {
-  console.warn('invoicePdfUrl: use openInvoicePdfForPrint instead')
-  return ''
+export async function loadPdfBlobUrl (fetchFn) {
+  const raw = await fetchFn()
+  const data = raw instanceof Blob ? raw : new Blob([raw])
+  const check = await validatePdfBlob(data)
+  if (!check.ok) throw new Error(check.message || 'Invalid PDF')
+  return URL.createObjectURL(new Blob([check.blob], { type: 'application/pdf' }))
 }
 
-export function receiptPdfUrl () {
-  console.warn('receiptPdfUrl: use openReceiptPdfForPrint instead')
-  return ''
-}
+export { parseApiErrorBlobMessage }
 
 export function isStandalonePwaMode () {
-  return needsBlobPdfFlow()
+  return checkStandalonePwa()
 }

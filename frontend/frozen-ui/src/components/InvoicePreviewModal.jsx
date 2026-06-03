@@ -5,13 +5,12 @@ import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
 import { triggerBlobDownload } from '../utils/blobDownload'
 import { validatePdfBlob } from '../utils/pdfBlob'
-import { downloadInvoicePdf } from '../utils/invoicePdfActions'
-import PrintOptionsModal from './PrintOptionsModal'
+import { downloadInvoicePdf, openInvoicePdfForPrint } from '../utils/invoicePdfActions'
+import { savePdfToDevice, isTouchOrTabletDevice } from '../utils/blobDownload'
 
 const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onNew }) => {
   const [loading, setLoading] = useState(false)
   const [invoice, setInvoice] = useState(null)
-  const [showPrintOptions, setShowPrintOptions] = useState(false)
 
   useEffect(() => {
     if (saleId) {
@@ -34,16 +33,11 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onNew }) => {
   }
 
   const handlePrint = () => {
-    setShowPrintOptions(true)
+    openInvoicePdfForPrint(saleId, invoice?.invoiceNo || invoiceNo)
   }
 
-  const handleDownload = async () => {
-    setLoading(true)
-    try {
-      await downloadInvoicePdf(saleId, invoice?.invoiceNo || invoiceNo)
-    } finally {
-      setLoading(false)
-    }
+  const handleDownload = () => {
+    downloadInvoicePdf(saleId, invoice?.invoiceNo || invoiceNo)
   }
 
   const handleWhatsAppShare = async () => {
@@ -88,7 +82,12 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onNew }) => {
         return
       }
       const invoiceNumber = invoice?.invoiceNo || invoiceNo || saleId
-      triggerBlobDownload(check.blob, `invoice_${invoiceNumber}.pdf`)
+      const fname = `invoice_${invoiceNumber}.pdf`
+      if (isTouchOrTabletDevice()) {
+        await savePdfToDevice(check.blob, fname)
+      } else {
+        triggerBlobDownload(check.blob, fname)
+      }
       const whatsappUrl = `https://wa.me/?text=${encodedMessage}`
       window.open(whatsappUrl, '_blank')
       toast.success('WhatsApp opened — attach the file from your downloads folder')
@@ -153,7 +152,12 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onNew }) => {
           toast.error(check.message)
           return
         }
-        triggerBlobDownload(check.blob, `invoice_${invoiceNo}.pdf`)
+        const fname = `invoice_${invoiceNo}.pdf`
+        if (isTouchOrTabletDevice()) {
+          await savePdfToDevice(check.blob, fname)
+        } else {
+          triggerBlobDownload(check.blob, fname)
+        }
         const subject = encodeURIComponent(`Invoice ${invoiceNo}`)
         const body = encodeURIComponent(`Please find invoice ${invoiceNo} attached.`)
         const mailtoLink = `mailto:${customerEmail}?subject=${subject}&body=${body}`
@@ -297,14 +301,6 @@ const InvoicePreviewModal = ({ saleId, invoiceNo, onClose, onNew }) => {
         </div>
       </div>
 
-      {/* Print Options Modal */}
-      {showPrintOptions && (
-        <PrintOptionsModal
-          saleId={saleId}
-          invoiceNo={invoice?.invoiceNo || invoiceNo}
-          onClose={() => setShowPrintOptions(false)}
-        />
-      )}
     </div>
   )
 }

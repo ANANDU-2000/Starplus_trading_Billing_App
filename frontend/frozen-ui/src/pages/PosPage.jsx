@@ -483,17 +483,20 @@ const PosPage = () => {
     setRoundOffInput(ro === 0 ? '' : String(ro))
   }
 
-  const handleDownloadPdf = async (saleId, invoiceNo) => {
-    await downloadInvoicePdf(saleId, invoiceNo, { toastId: 'pdf-download-toast' })
+  const handleDownloadPdf = (saleId, invoiceNo) => {
+    downloadInvoicePdf(saleId, invoiceNo)
   }
 
-  const handlePrintReceipt = async () => {
+  const handlePrintReceipt = () => {
     if (!lastCreatedInvoice) {
       toast.error('No invoice to print. Please create an invoice first.')
       return
     }
 
-    await openInvoicePdfForPrint(lastCreatedInvoice.id)
+    openInvoicePdfForPrint(
+      lastCreatedInvoice.id,
+      lastCreatedInvoice.invoiceNo
+    )
   }
 
   const handleWhatsAppShare = async () => {
@@ -2014,7 +2017,7 @@ const PosPage = () => {
                   className="w-full flex items-center justify-center px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors shadow-md"
                 >
                   <Download className="h-5 w-5 mr-2" />
-                  Download PDF
+                  Save PDF to device
                 </button>
                 
                 <button

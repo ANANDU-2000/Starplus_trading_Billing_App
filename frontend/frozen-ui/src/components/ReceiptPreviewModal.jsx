@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { X, Download, Printer } from 'lucide-react'
+import { X, Download, Printer, FileText } from 'lucide-react'
 import { paymentsAPI } from '../services'
 import toast from 'react-hot-toast'
 import {
   downloadReceiptPdf,
-  loadPdfBlobUrl,
-  openReceiptPdfForPrint
+  openReceiptPdfForPrint,
+  openReceiptPdfForViewing
 } from '../utils/invoicePdfActions'
 import { formatCurrency } from '../utils/currency'
 
@@ -54,53 +54,30 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
   }, [isOpen, paymentIds?.join(',')])
 
   const receiptId = receipt?.id ?? receipt?.Id
-  const [previewUrl, setPreviewUrl] = useState(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
+  const receiptNo = receipt?.receiptNumber || receipt?.ReceiptNumber
 
-  useEffect(() => {
-    if (!receiptId) {
-      setPreviewUrl(null)
-      return undefined
-    }
-    let cancelled = false
-    let activeUrl = null
-    setPreviewLoading(true)
-    const load = async () => {
-      try {
-        const url = await loadPdfBlobUrl(() => paymentsAPI.getReceiptPdf(receiptId))
-        activeUrl = url
-        if (!cancelled) setPreviewUrl(url)
-      } catch (err) {
-        if (!cancelled) {
-          console.error('[receipt-preview]', err)
-          setPreviewUrl(null)
-        }
-      } finally {
-        if (!cancelled) setPreviewLoading(false)
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
-      if (activeUrl) URL.revokeObjectURL(activeUrl)
-      setPreviewUrl(null)
-    }
-  }, [receiptId])
-
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!receiptId) {
       toast.error('Nothing to download yet')
       return
     }
-    await downloadReceiptPdf(receiptId, receipt?.receiptNumber || receipt?.ReceiptNumber)
+    downloadReceiptPdf(receiptId, receiptNo)
   }
 
-  const handlePrint = async () => {
+  const handlePrint = () => {
     if (!receiptId) {
       toast.error('Nothing to print yet')
       return
     }
-    await openReceiptPdfForPrint(receiptId)
+    openReceiptPdfForPrint(receiptId, receiptNo)
+  }
+
+  const handleViewPdf = () => {
+    if (!receiptId) {
+      toast.error('Nothing to view yet')
+      return
+    }
+    openReceiptPdfForViewing(receiptId, receiptNo)
   }
 
   if (!isOpen) return null
@@ -144,7 +121,7 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
             <div className="text-red-600 p-4">{error}</div>
           )}
           {!loading && !error && receipt && (
-            <div className="space-y-4 h-full flex flex-col">
+            <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                 <div className="bg-gray-50 rounded p-3">
                   <div className="text-gray-500">Customer</div>
@@ -163,41 +140,36 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
                   </div>
                 </div>
               </div>
-              {previewLoading && (
-                <div className="flex items-center justify-center min-h-[40vh] text-sm text-gray-500">
-                  Loading PDF preview…
-                </div>
-              )}
-              {!previewLoading && previewUrl && (
-                <iframe
-                  title="Receipt PDF Preview"
-                  src={previewUrl}
-                  className="w-full flex-1 min-h-[50vh] border rounded bg-white"
-                />
-              )}
-              {!previewLoading && !previewUrl && receiptId && (
-                <p className="text-sm text-gray-500 p-4">
-                  Preview unavailable. Use Print PDF or Download PDF below.
-                </p>
-              )}
+              <p className="text-sm text-gray-600">
+                Tap <strong>View PDF</strong> to preview the real PDF, then Save or Print from the viewer.
+              </p>
             </div>
           )}
         </div>
-        <div className="flex gap-2 p-4 border-t bg-gray-50">
+        <div className="flex flex-wrap gap-2 p-4 border-t bg-gray-50">
+          <button
+            type="button"
+            onClick={handleViewPdf}
+            disabled={!receiptId}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50"
+          >
+            <FileText className="h-4 w-4" />
+            View PDF
+          </button>
           <button
             type="button"
             onClick={handleDownload}
             disabled={!receiptId}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
-            Download PDF
+            Save to device
           </button>
           <button
             type="button"
             onClick={handlePrint}
             disabled={!receiptId}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
           >
             <Printer className="h-4 w-4" />
             Print PDF
