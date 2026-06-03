@@ -96,15 +96,6 @@ export async function savePdfToDevice (blob, filename) {
   const typed = toPdfBlob(blob)
   const file = new File([typed], filename, { type: 'application/pdf' })
 
-  if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: filename })
-      return 'share'
-    } catch (err) {
-      if (err?.name === 'AbortError') return 'cancelled'
-    }
-  }
-
   if (typeof window.showSaveFilePicker === 'function') {
     try {
       const handle = await window.showSaveFilePicker({
@@ -123,9 +114,17 @@ export async function savePdfToDevice (blob, filename) {
     }
   }
 
+  if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename })
+      return 'share'
+    } catch (err) {
+      if (err?.name === 'AbortError') return 'cancelled'
+    }
+  }
+
   if (needsBlobPdfFlow()) {
-    const opened = openPdfBlobInViewer(typed)
-    if (opened) return 'tab'
+    openPdfBlobInViewer(typed)
     return 'tab'
   }
 
@@ -133,66 +132,67 @@ export async function savePdfToDevice (blob, filename) {
   return 'download'
 }
 
-/**
- * Tablet/PWA: save via system share sheet (Files/Downloads) when supported.
- */
 export async function shareOrSavePdfBlob (blob, filename) {
   return savePdfToDevice(blob, filename)
 }
 
 /**
- * Print PDF via hidden iframe (works on Android Chrome / Honor browser).
+ * Print the real PDF (not the HTML app page).
+ * Prefer the visible preview iframe; otherwise open PDF in a new tab and print there.
  */
-export function printPdfBlob (blob) {
+export function printPdfBlob (blob, { previewIframe = null } = {}) {
   return new Promise((resolve) => {
     if (!blob || blob.size === 0) {
       resolve(false)
       return
     }
-    const typed = toPdfBlob(blob)
-    const url = URL.createObjectURL(typed)
-    const iframe = document.createElement('iframe')
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
-    iframe.title = 'print-pdf'
 
-    const cleanup = () => {
-      setTimeout(() => {
-        URL.revokeObjectURL(url)
-        iframe.remove()
-      }, 1000)
+    const typed = toPdfBlob(blob)
+    let printed = false
+
+    const tryPreviewIframe = () => {
+      if (!previewIframe?.contentWindow) return false
+      try {
+        previewIframe.contentWindow.focus()
+        previewIframe.contentWindow.print()
+        printed = true
+        resolve(true)
+        return true
+      } catch {
+        return false
+      }
     }
 
-    iframe.onload = () => {
+    if (tryPreviewIframe()) return
+
+    const url = URL.createObjectURL(typed)
+    const printWin = window.open(url, '_blank', 'noopener,noreferrer')
+
+    if (!printWin) {
+      URL.revokeObjectURL(url)
+      resolve(false)
+      return
+    }
+
+    const runPrint = () => {
+      if (printed) return
       try {
-        iframe.contentWindow?.focus()
-        iframe.contentWindow?.print()
+        printWin.focus()
+        printWin.print()
+        printed = true
         resolve(true)
       } catch {
-        openPdfBlobInViewer(typed)
         resolve(false)
-      } finally {
-        cleanup()
       }
     }
 
-    iframe.onerror = () => {
-      cleanup()
-      resolve(false)
-    }
-
-    document.body.appendChild(iframe)
-    iframe.src = url
+    printWin.addEventListener('load', () => {
+      setTimeout(runPrint, 600)
+    })
 
     setTimeout(() => {
-      if (iframe.parentNode) {
-        try {
-          iframe.contentWindow?.print()
-          resolve(true)
-        } catch {
-          resolve(false)
-        }
-        cleanup()
-      }
-    }, 3000)
+      if (!printed) runPrint()
+      setTimeout(() => URL.revokeObjectURL(url), 120_000)
+    }, 2500)
   })
 }

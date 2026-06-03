@@ -90,3 +90,10 @@
     scrollbar-width: none;  /* Firefox */
   }
 }
+
+/* Prevent printing the ledger/HTML shell via Ctrl+P — use PDF viewer Print PDF instead */
+@media print {
+  body {
+    visibility: hidden;
+  }
+}

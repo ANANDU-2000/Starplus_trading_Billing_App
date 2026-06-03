@@ -17,8 +17,6 @@ export default function PdfDocumentModal () {
     filename,
     fetchPdf,
     mode,
-    autoPrint,
-    autoSave,
     closePdfDocument
   } = usePdfDocumentStore()
 
@@ -28,7 +26,7 @@ export default function PdfDocumentModal () {
   const [previewUrl, setPreviewUrl] = useState(null)
   const [saving, setSaving] = useState(false)
   const [printing, setPrinting] = useState(false)
-  const autoHandledRef = useRef(false)
+  const previewIframeRef = useRef(null)
   const previewUrlRef = useRef(null)
 
   const revokePreview = useCallback(() => {
@@ -39,7 +37,6 @@ export default function PdfDocumentModal () {
     setPreviewUrl(null)
     setBlob(null)
     setError(null)
-    autoHandledRef.current = false
   }, [])
 
   const handleClose = useCallback(() => {
@@ -86,15 +83,11 @@ export default function PdfDocumentModal () {
     try {
       const result = await savePdfToDevice(blob, filename)
       if (result === 'cancelled') return
-      if (result === 'picker' || result === 'share') {
-        toast.success('PDF saved — check Files or Downloads')
+      if (result === 'picker' || result === 'share' || result === 'download') {
+        toast.success('PDF saved — check your Downloads or Files folder')
         return
       }
-      if (result === 'download') {
-        toast.success('Download started — check your downloads folder')
-        return
-      }
-      toast('Use ⋮ menu → Download, or Share → Save to Files', { duration: 5000, icon: 'i' })
+      toast('PDF opened in a new tab — use ⋮ → Download or Share → Save', { duration: 6000, icon: 'i' })
     } catch (err) {
       toast.error(err?.message || 'Could not save PDF')
     } finally {
@@ -106,9 +99,11 @@ export default function PdfDocumentModal () {
     if (!blob) return
     setPrinting(true)
     try {
-      const ok = await printPdfBlob(blob)
+      const ok = await printPdfBlob(blob, { previewIframe: previewIframeRef.current })
       if (!ok) {
-        toast.error('Print dialog could not open. Try Save PDF then print from Files.')
+        toast.error('Could not open print. Save the PDF first, then print from your file manager.')
+      } else {
+        toast.success('Print the invoice PDF shown in the preview or new tab — not this screen')
       }
     } catch (err) {
       toast.error(err?.message || 'Print failed')
@@ -117,23 +112,14 @@ export default function PdfDocumentModal () {
     }
   }, [blob])
 
-  useEffect(() => {
-    if (!isOpen || loading || error || !blob || autoHandledRef.current) return
-    if (!autoPrint && !autoSave) return
-    autoHandledRef.current = true
-    const run = async () => {
-      if (autoPrint) await handlePrint()
-      else if (autoSave) await handleSave()
-    }
-    void run()
-  }, [isOpen, loading, error, blob, autoPrint, autoSave, handlePrint, handleSave])
-
   if (!isOpen) return null
 
   const touchHint = isTouchOrTabletDevice()
+  const emphasizePrint = mode === 'print'
+  const emphasizeSave = mode === 'download'
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-2 sm:p-4">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-2 sm:p-4 print:hidden">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] flex flex-col">
         <div className="flex items-center justify-between p-3 sm:p-4 border-b shrink-0">
           <h2 className="text-base sm:text-lg font-bold text-gray-900 truncate pr-2">{title}</h2>
@@ -151,7 +137,7 @@ export default function PdfDocumentModal () {
           {loading && (
             <div className="flex flex-col items-center justify-center h-full min-h-[40vh] gap-3 text-gray-600">
               <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
-              <span>Loading PDF…</span>
+              <span>Loading invoice PDF…</span>
             </div>
           )}
           {error && !loading && (
@@ -159,6 +145,7 @@ export default function PdfDocumentModal () {
           )}
           {!loading && !error && previewUrl && (
             <iframe
+              ref={previewIframeRef}
               title={title}
               src={previewUrl}
               className="w-full h-full min-h-[50vh] border-0 rounded bg-white"
@@ -168,8 +155,15 @@ export default function PdfDocumentModal () {
 
         {touchHint && !loading && !error && blob && (
           <p className="px-4 py-2 text-xs text-gray-600 bg-amber-50 border-t border-amber-100">
-            On tablet: tap <strong>Save to device</strong> → choose Files or Downloads.
-            For print, tap <strong>Print PDF</strong> and select your printer.
+            This is the real invoice PDF. Tap <strong>Save to device</strong> for Downloads/Files,
+            or <strong>Print PDF</strong> to print this document (not the ledger screen).
+          </p>
+        )}
+
+        {!touchHint && !loading && !error && blob && (
+          <p className="px-4 py-2 text-xs text-gray-600 bg-blue-50 border-t border-blue-100">
+            Preview shows the server-generated PDF. Use <strong>Print PDF</strong> to print this invoice —
+            do not use the browser Print on the ledger page (Ctrl+P).
           </p>
         )}
 
@@ -178,7 +172,11 @@ export default function PdfDocumentModal () {
             type="button"
             onClick={handleSave}
             disabled={!blob || saving || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg disabled:opacity-50 text-sm font-medium ${
+              emphasizeSave
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Save to device
@@ -187,7 +185,11 @@ export default function PdfDocumentModal () {
             type="button"
             onClick={handlePrint}
             disabled={!blob || printing || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 text-sm font-medium"
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg disabled:opacity-50 text-sm font-medium ${
+              emphasizePrint
+                ? 'bg-gray-800 text-white hover:bg-gray-900 ring-2 ring-gray-400'
+                : 'bg-gray-700 text-white hover:bg-gray-800'
+            }`}
           >
             {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
             Print PDF
