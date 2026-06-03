@@ -15,15 +15,21 @@ import {
   MessageCircle,
   Mail,
   Download,
-  CheckCircle
+  CheckCircle,
+  FileText
 } from 'lucide-react'
 import { productsAPI, salesAPI, customersAPI } from '../services'
 import { formatCurrency, formatBalance, formatBalanceWithColor } from '../utils/currency'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
-import { triggerBlobDownload } from '../utils/blobDownload'
+import { savePdfToDevice } from '../utils/blobDownload'
 import { validatePdfBlob } from '../utils/pdfBlob'
-import { downloadInvoicePdf, openInvoicePdfForPrint } from '../utils/invoicePdfActions'
+import {
+  downloadInvoicePdf,
+  openInvoicePdfForPrint,
+  openInvoicePdfForViewing,
+  prefetchInvoicePdf
+} from '../utils/invoicePdfActions'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
 
 const PosPage = () => {
@@ -483,20 +489,29 @@ const PosPage = () => {
     setRoundOffInput(ro === 0 ? '' : String(ro))
   }
 
-  const handleDownloadPdf = (saleId, invoiceNo) => {
-    downloadInvoicePdf(saleId, invoiceNo)
-  }
-
-  const handlePrintReceipt = () => {
-    if (!lastCreatedInvoice) {
-      toast.error('No invoice to print. Please create an invoice first.')
+  const runPosPdfAction = (action) => {
+    if (!lastCreatedInvoice?.id) {
+      toast.error('No invoice available.')
       return
     }
+    setShowInvoiceOptionsModal(false)
+    action(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)
+  }
 
-    openInvoicePdfForPrint(
-      lastCreatedInvoice.id,
-      lastCreatedInvoice.invoiceNo
-    )
+  const handleViewInvoicePdf = () => {
+    runPosPdfAction(openInvoicePdfForViewing)
+  }
+
+  const handlePrintInvoicePdf = () => {
+    runPosPdfAction(openInvoicePdfForPrint)
+  }
+
+  const handleSaveInvoicePdf = () => {
+    runPosPdfAction(downloadInvoicePdf)
+  }
+
+  const queueInvoicePdfPrefetch = (saleId) => {
+    if (saleId) void prefetchInvoicePdf(saleId)
   }
 
   const handleWhatsAppShare = async () => {
@@ -526,10 +541,15 @@ const PosPage = () => {
           toast.error(check.message)
           return
         }
-        triggerBlobDownload(check.blob, `invoice_${invoiceNo}.pdf`)
+        const fname = `invoice_${invoiceNo}.pdf`
+        const saveResult = await savePdfToDevice(check.blob, fname)
         const whatsappUrl = `https://wa.me/?text=${encodedMessage}`
         window.open(whatsappUrl, '_blank')
-        toast.success('WhatsApp opened — attach the file from your downloads folder')
+        if (saveResult === 'picker' || saveResult === 'share' || saveResult === 'download') {
+          toast.success('WhatsApp opened — attach the saved PDF from Files/Downloads')
+        } else {
+          toast('WhatsApp opened — save PDF from the viewer tab first, then attach', { duration: 5000, icon: 'i' })
+        }
       } catch (apiError) {
         console.error('API Error:', apiError)
         toast.error(apiError.message || 'Failed to generate PDF')
@@ -724,7 +744,8 @@ const PosPage = () => {
               data: response.data
             })
             setShowInvoiceOptionsModal(true)
-            
+            queueInvoicePdfPrefetch(saleId)
+
             // If we came from customer ledger, offer to go back
             const cameFromLedger = document.referrer.includes('/ledger')
             if (cameFromLedger) {
@@ -786,6 +807,7 @@ const PosPage = () => {
               data: response.data
             })
             setShowInvoiceOptionsModal(true)
+            queueInvoicePdfPrefetch(saleId)
           } else {
             // Clear cart and reset for new invoice if no saleId
             handleNewInvoice()
@@ -1939,6 +1961,7 @@ const PosPage = () => {
                             data: response.data
                           })
                           setShowInvoiceOptionsModal(true)
+                          queueInvoicePdfPrefetch(saleId)
                         } else {
                           handleNewInvoice()
                         }
@@ -2002,22 +2025,37 @@ const PosPage = () => {
             <div className="p-6 space-y-4">
               <p className="text-gray-700 mb-4">What would you like to do with this invoice?</p>
               
+              <p className="text-xs text-gray-500 mb-2">
+                Opens the real tax invoice PDF (not this screen). Build {import.meta.env.VITE_APP_BUILD || 'dev'}
+              </p>
+
               {/* Action Buttons */}
               <div className="space-y-3">
                 <button
-                  onClick={handlePrintReceipt}
+                  type="button"
+                  onClick={handleViewInvoicePdf}
+                  className="w-full flex items-center justify-center px-6 py-3 border-2 border-blue-600 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors shadow-sm"
+                >
+                  <FileText className="h-5 w-5 mr-2" />
+                  View Invoice PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintInvoicePdf}
                   className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md"
                 >
                   <Printer className="h-5 w-5 mr-2" />
-                  Print Invoice (PDF)
+                  Print Invoice PDF
                 </button>
                 
                 <button
-                  onClick={() => handleDownloadPdf(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)}
-                  className="w-full flex items-center justify-center px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors shadow-md"
+                  type="button"
+                  onClick={handleSaveInvoicePdf}
+                  className="w-full flex items-center justify-center px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors shadow-md"
                 >
                   <Download className="h-5 w-5 mr-2" />
-                  Save PDF to device
+                  Save Invoice PDF
                 </button>
                 
                 <button

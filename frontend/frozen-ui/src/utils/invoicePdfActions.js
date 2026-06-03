@@ -3,6 +3,7 @@ import { salesAPI, paymentsAPI, customersAPI } from '../services'
 import { usePdfDocumentStore } from '../stores/pdfDocumentStore'
 import { isStandalonePwaMode as checkStandalonePwa } from './blobDownload'
 import { parseApiErrorBlobMessage, validatePdfBlob } from './pdfBlob'
+import { getCachedInvoicePdf, setCachedInvoicePdf } from './pdfBlobCache'
 
 const recentOpenByKey = new Map()
 const DEBOUNCE_MS = 700
@@ -43,6 +44,37 @@ function openPdfDocument ({ title, filename, fetchPdf, mode = 'view', debounceKe
   return true
 }
 
+async function fetchInvoicePdfValidated (saleId) {
+  const cached = getCachedInvoicePdf(saleId)
+  if (cached) return cached
+
+  const raw = await salesAPI.getInvoicePdf(saleId)
+  const data = raw instanceof Blob ? raw : new Blob([raw])
+  const check = await validatePdfBlob(data)
+  if (!check.ok) {
+    throw new Error(check.message || 'Server did not return a valid PDF')
+  }
+  const typed = new Blob([check.blob], { type: 'application/pdf' })
+  setCachedInvoicePdf(saleId, typed)
+  return typed
+}
+
+/** Prefetch after POS sale — speeds up View/Print/Save on tablet */
+export async function prefetchInvoicePdf (saleId) {
+  if (!saleId) return false
+  try {
+    await fetchInvoicePdfValidated(saleId)
+    return true
+  } catch (err) {
+    console.warn('[prefetchInvoicePdf]', saleId, err)
+    return false
+  }
+}
+
+function invoicePdfFetcher (saleId) {
+  return () => fetchInvoicePdfValidated(saleId)
+}
+
 // --- Invoice (sale) ---
 
 export function openInvoicePdfForPrint (saleId, invoiceNo) {
@@ -53,7 +85,7 @@ export function openInvoicePdfForPrint (saleId, invoiceNo) {
   return openPdfDocument({
     title: `Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
-    fetchPdf: () => salesAPI.getInvoicePdf(saleId),
+    fetchPdf: invoicePdfFetcher(saleId),
     mode: 'print',
     debounceKey: `print:invoice:${saleId}`
   })
@@ -67,7 +99,7 @@ export function openInvoicePdfForViewing (saleId, invoiceNo) {
   return openPdfDocument({
     title: `Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
-    fetchPdf: () => salesAPI.getInvoicePdf(saleId),
+    fetchPdf: invoicePdfFetcher(saleId),
     mode: 'view',
     debounceKey: `view:invoice:${saleId}`
   })
@@ -81,7 +113,7 @@ export function downloadInvoicePdf (saleId, invoiceNo) {
   return openPdfDocument({
     title: `Download — Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
-    fetchPdf: () => salesAPI.getInvoicePdf(saleId),
+    fetchPdf: invoicePdfFetcher(saleId),
     mode: 'download',
     debounceKey: `download:invoice:${saleId}`
   })

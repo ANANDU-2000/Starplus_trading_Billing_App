@@ -19,6 +19,7 @@ import Layout from './components/Layout'
 import ConnectionStatus from './components/ConnectionStatus'
 import ErrorBoundary from './components/ErrorBoundary'
 import PdfDocumentModal from './components/PdfDocumentModal'
+import AppUpdateBanner from './components/AppUpdateBanner'
 
 function App() {
   const { user, loading } = useAuth()
@@ -34,6 +35,7 @@ function App() {
   if (!user) {
     return (
       <>
+        <AppUpdateBanner />
         <Login />
         <PdfDocumentModal />
       </>
@@ -42,6 +44,7 @@ function App() {
 
   return (
     <ErrorBoundary>
+      <AppUpdateBanner />
       <ConnectionStatus />
       <PdfDocumentModal />
       <Routes>

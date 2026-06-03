@@ -7,7 +7,6 @@ import {
   savePdfToDevice,
   printPdfBlob,
   isTouchOrTabletDevice,
-  triggerBlobDownload
 } from '../utils/blobDownload'
 
 export default function PdfDocumentModal () {
@@ -153,17 +152,23 @@ export default function PdfDocumentModal () {
           )}
         </div>
 
+        {!loading && !error && blob && (
+          <p className="px-4 py-2 text-sm text-gray-800 bg-green-50 border-t border-green-200 font-medium">
+            This is your <strong>tax invoice PDF</strong> from the server — not the POS table or screen.
+            {emphasizeSave && ' Tap Save to device.'}
+            {emphasizePrint && ' Tap Print PDF below.'}
+          </p>
+        )}
+
         {touchHint && !loading && !error && blob && (
           <p className="px-4 py-2 text-xs text-gray-600 bg-amber-50 border-t border-amber-100">
-            This is the real invoice PDF. Tap <strong>Save to device</strong> for Downloads/Files,
-            or <strong>Print PDF</strong> to print this document (not the ledger screen).
+            On Honor/tablet: Save → Share → Files or Downloads. Print → use Print PDF button here only.
           </p>
         )}
 
         {!touchHint && !loading && !error && blob && (
           <p className="px-4 py-2 text-xs text-gray-600 bg-blue-50 border-t border-blue-100">
-            Preview shows the server-generated PDF. Use <strong>Print PDF</strong> to print this invoice —
-            do not use the browser Print on the ledger page (Ctrl+P).
+            Do not use browser Ctrl+P on the app — use <strong>Print PDF</strong> in this window.
           </p>
         )}
 
@@ -197,15 +202,17 @@ export default function PdfDocumentModal () {
           {!touchHint && blob && (
             <button
               type="button"
-              onClick={() => {
-                triggerBlobDownload(blob, filename)
-                toast.success('Download started')
+              onClick={async () => {
+                const result = await savePdfToDevice(blob, filename)
+                if (result === 'picker' || result === 'share' || result === 'download') {
+                  toast.success('PDF saved to your chosen folder')
+                }
               }}
               disabled={loading}
               className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm"
             >
               <Download className="h-4 w-4" />
-              Quick download
+              Save to folder
             </button>
           )}
           <button
