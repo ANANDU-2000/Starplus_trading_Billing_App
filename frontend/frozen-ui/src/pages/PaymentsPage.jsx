@@ -401,7 +401,7 @@ const PaymentsPage = () => {
   const handlePrintReceipt = async (payment) => {
     try {
       const { receiptId } = await ensureReceiptId(payment)
-      openReceiptPdfForPrint(receiptId)
+      await openReceiptPdfForPrint(receiptId)
     } catch (error) {
       console.error('Failed to print receipt:', error)
       toast.error(await parseApiErrorBlobMessage(error, 'Failed to print receipt'))

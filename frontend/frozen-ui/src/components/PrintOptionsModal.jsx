@@ -11,11 +11,7 @@ const PrintOptionsModal = ({ saleId, invoiceNo, onClose, onPrint }) => {
 
   const handlePrint = async () => {
     try {
-      if (format === 'A4') {
-        openInvoicePdfForPrint(saleId)
-      } else {
-        openInvoicePdfForPrint(saleId, { format: 'thermal', width: format === 'thermal58' ? '58' : '80' })
-      }
+      await openInvoicePdfForPrint(saleId)
 
       // The modal itself already opens the PDF/print flow.
       // Avoid invoking parent print callback here to prevent duplicate tab openings in PWA.

@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { X, Download, Printer } from 'lucide-react'
 import { paymentsAPI } from '../services'
 import toast from 'react-hot-toast'
 import {
   downloadReceiptPdf,
-  openReceiptPdfForPrint,
-  receiptPdfUrl
+  loadPdfBlobUrl,
+  openReceiptPdfForPrint
 } from '../utils/invoicePdfActions'
 import { formatCurrency } from '../utils/currency'
 
@@ -54,9 +54,37 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
   }, [isOpen, paymentIds?.join(',')])
 
   const receiptId = receipt?.id ?? receipt?.Id
-  const previewUrl = useMemo(() => {
-    if (!receiptId) return null
-    return receiptPdfUrl(receiptId, { open: true })
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  useEffect(() => {
+    if (!receiptId) {
+      setPreviewUrl(null)
+      return undefined
+    }
+    let cancelled = false
+    let activeUrl = null
+    setPreviewLoading(true)
+    const load = async () => {
+      try {
+        const url = await loadPdfBlobUrl(() => paymentsAPI.getReceiptPdf(receiptId))
+        activeUrl = url
+        if (!cancelled) setPreviewUrl(url)
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[receipt-preview]', err)
+          setPreviewUrl(null)
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+      if (activeUrl) URL.revokeObjectURL(activeUrl)
+      setPreviewUrl(null)
+    }
   }, [receiptId])
 
   const handleDownload = async () => {
@@ -67,12 +95,12 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
     await downloadReceiptPdf(receiptId, receipt?.receiptNumber || receipt?.ReceiptNumber)
   }
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!receiptId) {
       toast.error('Nothing to print yet')
       return
     }
-    openReceiptPdfForPrint(receiptId)
+    await openReceiptPdfForPrint(receiptId)
   }
 
   if (!isOpen) return null
@@ -135,12 +163,22 @@ export default function ReceiptPreviewModal ({ paymentIds = [], isOpen, onClose 
                   </div>
                 </div>
               </div>
-              {previewUrl && (
+              {previewLoading && (
+                <div className="flex items-center justify-center min-h-[40vh] text-sm text-gray-500">
+                  Loading PDF preview…
+                </div>
+              )}
+              {!previewLoading && previewUrl && (
                 <iframe
                   title="Receipt PDF Preview"
                   src={previewUrl}
                   className="w-full flex-1 min-h-[50vh] border rounded bg-white"
                 />
+              )}
+              {!previewLoading && !previewUrl && receiptId && (
+                <p className="text-sm text-gray-500 p-4">
+                  Preview unavailable. Use Print PDF or Download PDF below.
+                </p>
               )}
             </div>
           )}

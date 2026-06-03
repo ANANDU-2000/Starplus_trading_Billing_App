@@ -493,7 +493,7 @@ const PosPage = () => {
       return
     }
 
-    openInvoicePdfForPrint(lastCreatedInvoice.id)
+    await openInvoicePdfForPrint(lastCreatedInvoice.id)
   }
 
   const handleWhatsAppShare = async () => {
@@ -2006,7 +2006,7 @@ const PosPage = () => {
                   className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md"
                 >
                   <Printer className="h-5 w-5 mr-2" />
-                  Print Receipt
+                  Print Invoice (PDF)
                 </button>
                 
                 <button
