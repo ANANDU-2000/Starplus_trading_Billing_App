@@ -82,8 +82,12 @@ export default function PdfDocumentModal () {
     try {
       const result = await savePdfToDevice(blob, filename)
       if (result === 'cancelled') return
-      if (result === 'picker' || result === 'share' || result === 'download') {
+      if (result === 'picker' || result === 'share') {
         toast.success('PDF saved — check your Downloads or Files folder')
+        return
+      }
+      if (result === 'download') {
+        toast.success('PDF saved to downloads folder')
         return
       }
       toast('PDF opened in a new tab — use ⋮ → Download or Share → Save', { duration: 6000, icon: 'i' })

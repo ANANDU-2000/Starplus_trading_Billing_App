@@ -13,13 +13,15 @@
 
 ## POS after creating a sale
 
-Buttons on the success popup:
+The success popup shows the **real invoice PDF inside the popup** (iframe). Wait until you see the tax invoice — then use buttons.
 
 | Button | What it does |
 |--------|----------------|
-| **View Invoice PDF** | Opens full tax invoice PDF preview |
-| **Print Invoice PDF** | Same viewer → tap **Print PDF** (real invoice, not the POS screen) |
-| **Save Invoice PDF** | Same viewer → tap **Save to device** (Share → Files/Downloads on tablet) |
+| **View Invoice PDF** | Opens full-screen PDF viewer |
+| **Print Invoice PDF** | Prints the PDF shown in the popup (only works after PDF loads) |
+| **Save Invoice PDF** | Saves only when Share/Files or folder picker succeeds — no fake “download started” message |
+
+If you still see **Print Receipt** or **Download PDF**, you are on an old app — the blocking **Update app now** screen must appear after deploy; clear cache if it does not.
 
 Do **not** use the browser menu Print (Ctrl+P) on the POS page — that prints a blank screen.
 

@@ -22,14 +22,16 @@ import { productsAPI, salesAPI, customersAPI } from '../services'
 import { formatCurrency, formatBalance, formatBalanceWithColor } from '../utils/currency'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
-import { savePdfToDevice } from '../utils/blobDownload'
 import { validatePdfBlob } from '../utils/pdfBlob'
 import {
   downloadInvoicePdf,
   openInvoicePdfForPrint,
   openInvoicePdfForViewing,
-  prefetchInvoicePdf
+  prefetchInvoicePdf,
+  getCachedInvoicePdf,
+  loadCachedInvoicePdfUrl
 } from '../utils/invoicePdfActions'
+import { savePdfToDevice, printPdfBlob } from '../utils/blobDownload'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
 
 const PosPage = () => {
@@ -54,6 +56,12 @@ const PosPage = () => {
   const [loading, setLoading] = useState(false)
   const [showInvoiceOptionsModal, setShowInvoiceOptionsModal] = useState(false)
   const [lastCreatedInvoice, setLastCreatedInvoice] = useState(null)
+  const [posPdfPreviewUrl, setPosPdfPreviewUrl] = useState(null)
+  const [posPdfLoading, setPosPdfLoading] = useState(false)
+  const [posPdfError, setPosPdfError] = useState(null)
+  const [posPdfReady, setPosPdfReady] = useState(false)
+  const posPdfPreviewRef = useRef(null)
+  const posPdfUrlRef = useRef(null)
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('0001')
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingSaleId, setEditingSaleId] = useState(null)
@@ -489,9 +497,58 @@ const PosPage = () => {
     setRoundOffInput(ro === 0 ? '' : String(ro))
   }
 
+  const revokePosPdfPreview = useCallback(() => {
+    if (posPdfUrlRef.current) {
+      URL.revokeObjectURL(posPdfUrlRef.current)
+      posPdfUrlRef.current = null
+    }
+    setPosPdfPreviewUrl(null)
+    setPosPdfReady(false)
+    setPosPdfError(null)
+  }, [])
+
+  const loadPosInvoicePdfPreview = useCallback(async (saleId) => {
+    if (!saleId) return
+    setPosPdfLoading(true)
+    setPosPdfError(null)
+    setPosPdfReady(false)
+    revokePosPdfPreview()
+    try {
+      const result = await prefetchInvoicePdf(saleId)
+      if (!result.ok) {
+        setPosPdfError(result.error || 'Could not load invoice PDF from server')
+        toast.error(result.error || 'Invoice PDF not ready — check connection and try View Invoice PDF')
+        return
+      }
+      const url = await loadCachedInvoicePdfUrl(saleId)
+      posPdfUrlRef.current = url
+      setPosPdfPreviewUrl(url)
+      setPosPdfReady(true)
+    } catch (err) {
+      const msg = err?.message || 'Failed to load invoice PDF'
+      setPosPdfError(msg)
+      toast.error(msg)
+    } finally {
+      setPosPdfLoading(false)
+    }
+  }, [revokePosPdfPreview])
+
+  useEffect(() => {
+    if (!showInvoiceOptionsModal || !lastCreatedInvoice?.id) {
+      revokePosPdfPreview()
+      return
+    }
+    loadPosInvoicePdfPreview(lastCreatedInvoice.id)
+    return () => revokePosPdfPreview()
+  }, [showInvoiceOptionsModal, lastCreatedInvoice?.id, loadPosInvoicePdfPreview, revokePosPdfPreview])
+
   const runPosPdfAction = (action) => {
     if (!lastCreatedInvoice?.id) {
       toast.error('No invoice available.')
+      return
+    }
+    if (!posPdfReady) {
+      toast.error(posPdfError || 'Invoice PDF is still loading. Please wait.')
       return
     }
     setShowInvoiceOptionsModal(false)
@@ -502,16 +559,56 @@ const PosPage = () => {
     runPosPdfAction(openInvoicePdfForViewing)
   }
 
-  const handlePrintInvoicePdf = () => {
-    runPosPdfAction(openInvoicePdfForPrint)
+  const handlePrintInvoicePdf = async () => {
+    if (!lastCreatedInvoice?.id) return
+    if (!posPdfReady) {
+      toast.error(posPdfError || 'PDF not loaded yet')
+      return
+    }
+    const blob = getCachedInvoicePdf(lastCreatedInvoice.id)
+    if (!blob) {
+      runPosPdfAction(openInvoicePdfForPrint)
+      return
+    }
+    const ok = await printPdfBlob(blob, { previewIframe: posPdfPreviewRef.current })
+    if (ok) {
+      toast.success('Print dialog opened — print the tax invoice PDF shown above')
+    } else {
+      setShowInvoiceOptionsModal(false)
+      openInvoicePdfForPrint(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)
+    }
   }
 
-  const handleSaveInvoicePdf = () => {
-    runPosPdfAction(downloadInvoicePdf)
+  const handleSaveInvoicePdf = async () => {
+    if (!lastCreatedInvoice?.id) return
+    if (!posPdfReady) {
+      toast.error(posPdfError || 'PDF not loaded yet')
+      return
+    }
+    const blob = getCachedInvoicePdf(lastCreatedInvoice.id)
+    const invoiceNo = lastCreatedInvoice.invoiceNo || lastCreatedInvoice.id
+    const fname = `INV-${String(invoiceNo).replace(/[^\w.-]+/g, '_')}.pdf`
+    if (!blob) {
+      runPosPdfAction(downloadInvoicePdf)
+      return
+    }
+    const result = await savePdfToDevice(blob, fname)
+    if (result === 'cancelled') return
+    if (result === 'picker' || result === 'share') {
+      toast.success('PDF saved — open Files or Downloads to find it')
+      return
+    }
+    if (result === 'download') {
+      toast.success('PDF saved to your downloads folder')
+      return
+    }
+    setShowInvoiceOptionsModal(false)
+    downloadInvoicePdf(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)
+    toast('Choose Save to device in the PDF viewer', { duration: 5000, icon: 'i' })
   }
 
   const queueInvoicePdfPrefetch = (saleId) => {
-    if (saleId) void prefetchInvoicePdf(saleId)
+    if (saleId && showInvoiceOptionsModal) void loadPosInvoicePdfPreview(saleId)
   }
 
   const handleWhatsAppShare = async () => {
@@ -605,6 +702,7 @@ const PosPage = () => {
 
   const handleCloseInvoiceOptions = async () => {
     setShowInvoiceOptionsModal(false)
+    revokePosPdfPreview()
     setLastCreatedInvoice(null)
     // Refresh all data after billing
     await Promise.all([
@@ -2002,8 +2100,8 @@ const PosPage = () => {
 
       {/* Invoice Options Modal */}
       {showInvoiceOptionsModal && lastCreatedInvoice && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[95vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-green-50">
               <div>
@@ -2022,12 +2120,46 @@ const PosPage = () => {
             </div>
 
             {/* Content */}
-            <div className="p-6 space-y-4">
-              <p className="text-gray-700 mb-4">What would you like to do with this invoice?</p>
-              
-              <p className="text-xs text-gray-500 mb-2">
-                Opens the real tax invoice PDF (not this screen). Build {import.meta.env.VITE_APP_BUILD || 'dev'}
+            <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <p className="text-gray-700">Your tax invoice PDF (from server):</p>
+
+              <p className="text-xs font-mono text-gray-500">
+                App {import.meta.env.VITE_APP_BUILD || 'OLD'} · {import.meta.env.VITE_APP_COMMIT || 'legacy'}
+                {import.meta.env.VITE_POS_PDF_V2 !== 'true' && (
+                  <span className="text-red-600 font-bold block">OUTDATED APP — tap Update if shown</span>
+                )}
               </p>
+
+              {posPdfLoading && (
+                <div className="flex items-center justify-center py-8 text-gray-600 text-sm">
+                  Loading real invoice PDF…
+                </div>
+              )}
+              {posPdfError && !posPdfLoading && (
+                <div className="p-3 bg-red-50 text-red-700 text-sm rounded border border-red-200">
+                  {posPdfError}
+                  <button
+                    type="button"
+                    className="block mt-2 underline font-medium"
+                    onClick={() => loadPosInvoicePdfPreview(lastCreatedInvoice.id)}
+                  >
+                    Retry load PDF
+                  </button>
+                </div>
+              )}
+              {posPdfPreviewUrl && !posPdfLoading && (
+                <iframe
+                  ref={posPdfPreviewRef}
+                  title="Invoice PDF"
+                  src={posPdfPreviewUrl}
+                  className="w-full h-[40vh] min-h-[220px] border rounded bg-white"
+                />
+              )}
+              {posPdfReady && (
+                <p className="text-xs text-green-700 font-medium">
+                  PDF loaded — this is the real invoice. Use buttons below (not browser Print).
+                </p>
+              )}
 
               {/* Action Buttons */}
               <div className="space-y-3">
@@ -2043,7 +2175,8 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handlePrintInvoicePdf}
-                  className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md"
+                  disabled={!posPdfReady || posPdfLoading}
+                  className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
                 >
                   <Printer className="h-5 w-5 mr-2" />
                   Print Invoice PDF
@@ -2052,7 +2185,8 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handleSaveInvoicePdf}
-                  className="w-full flex items-center justify-center px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors shadow-md"
+                  disabled={!posPdfReady || posPdfLoading}
+                  className="w-full flex items-center justify-center px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors shadow-md disabled:opacity-50"
                 >
                   <Download className="h-5 w-5 mr-2" />
                   Save Invoice PDF

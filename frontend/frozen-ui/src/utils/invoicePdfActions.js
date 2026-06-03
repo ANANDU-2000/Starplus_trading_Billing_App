@@ -61,15 +61,23 @@ async function fetchInvoicePdfValidated (saleId) {
 
 /** Prefetch after POS sale — speeds up View/Print/Save on tablet */
 export async function prefetchInvoicePdf (saleId) {
-  if (!saleId) return false
+  if (!saleId) return { ok: false, error: 'No sale id' }
   try {
     await fetchInvoicePdfValidated(saleId)
-    return true
+    return { ok: true }
   } catch (err) {
     console.warn('[prefetchInvoicePdf]', saleId, err)
-    return false
+    const msg = err?.message || 'Failed to load invoice PDF'
+    return { ok: false, error: msg }
   }
 }
+
+export async function loadCachedInvoicePdfUrl (saleId) {
+  const blob = await fetchInvoicePdfValidated(saleId)
+  return URL.createObjectURL(blob)
+}
+
+export { fetchInvoicePdfValidated, getCachedInvoicePdf }
 
 function invoicePdfFetcher (saleId) {
   return () => fetchInvoicePdfValidated(saleId)

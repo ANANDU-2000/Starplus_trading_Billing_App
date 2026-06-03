@@ -1,35 +1,52 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, AlertTriangle } from 'lucide-react'
 import { useAppUpdate } from '../hooks/useAppUpdate'
 
 export default function AppUpdateBanner () {
-  const { updateAvailable, embeddedBuild, remoteBuild, applyUpdate, checking } = useAppUpdate()
+  const {
+    updateAvailable,
+    embeddedBuild,
+    embeddedCommit,
+    remoteBuild,
+    remoteCommit,
+    applyUpdate,
+    checking
+  } = useAppUpdate()
 
   if (!updateAvailable) return null
 
+  const isLegacy = !embeddedBuild || !embeddedCommit
+
   return (
-    <div className="fixed top-0 left-0 right-0 z-[300] bg-amber-500 text-amber-950 px-3 py-2 shadow-md">
-      <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-2 text-sm">
-        <p className="font-medium">
-          New app version available ({remoteBuild || 'update'}). You must refresh to use PDF print/download.
-          {embeddedBuild && (
-            <span className="block text-xs font-normal opacity-90">
-              Current: {embeddedBuild}
-            </span>
-          )}
+    <div className="fixed inset-0 z-[500] bg-black/70 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 text-center">
+        <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
+        <h2 className="text-lg font-bold text-gray-900 mb-2">
+          {isLegacy ? 'Old app version — PDF will not work' : 'New version required'}
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          {isLegacy
+            ? 'Your tablet is using a cached old copy (Print Receipt / fake download messages). You must update before invoice PDF print or save will work.'
+            : 'A new version was deployed. Refresh to fix POS Print and Save PDF.'}
         </p>
+        {embeddedBuild && (
+          <p className="text-xs text-gray-500 mb-1">Your app: {embeddedBuild} ({embeddedCommit || 'no commit'})</p>
+        )}
+        {remoteBuild && (
+          <p className="text-xs text-gray-500 mb-4">Latest: {remoteBuild} ({remoteCommit || ''})</p>
+        )}
         <button
           type="button"
           onClick={applyUpdate}
           disabled={checking}
-          className="flex items-center gap-1.5 px-4 py-1.5 bg-amber-950 text-amber-50 rounded-md font-semibold hover:bg-black shrink-0"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
         >
-          <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
-          Update now
+          <RefreshCw className={`h-5 w-5 ${checking ? 'animate-spin' : ''}`} />
+          Update app now
         </button>
+        <p className="text-xs text-gray-500 mt-4">
+          Honor/PWA: remove from home screen → Chrome → Clear site data → reopen → reinstall.
+        </p>
       </div>
-      <p className="max-w-4xl mx-auto text-xs mt-1 opacity-90">
-        On tablet PWA: remove app from home screen, clear site data in browser, reopen site, reinstall.
-      </p>
     </div>
   )
 }

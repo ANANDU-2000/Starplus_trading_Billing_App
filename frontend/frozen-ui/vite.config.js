@@ -27,7 +27,8 @@ export default defineConfig({
   plugins: [react(), emitVersionJson()],
   define: {
     'import.meta.env.VITE_APP_BUILD': JSON.stringify(buildStamp),
-    'import.meta.env.VITE_APP_COMMIT': JSON.stringify(commitRef)
+    'import.meta.env.VITE_APP_COMMIT': JSON.stringify(commitRef),
+    'import.meta.env.VITE_POS_PDF_V2': JSON.stringify('true')
   },
   resolve: {
     dedupe: ['react', 'react-dom']

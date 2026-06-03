@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 const STORAGE_KEY = 'starplus_app_build'
+const STORAGE_COMMIT_KEY = 'starplus_app_commit'
 
 export function getStoredBuild () {
   try {
@@ -10,9 +11,10 @@ export function getStoredBuild () {
   }
 }
 
-export function setStoredBuild (build) {
+export function setStoredBuild (build, commit) {
   try {
     if (build) localStorage.setItem(STORAGE_KEY, build)
+    if (commit) localStorage.setItem(STORAGE_COMMIT_KEY, commit)
   } catch {
     /* ignore */
   }
@@ -20,12 +22,13 @@ export function setStoredBuild (build) {
 
 export function useAppUpdate () {
   const embeddedBuild = import.meta.env.VITE_APP_BUILD || ''
+  const embeddedCommit = import.meta.env.VITE_APP_COMMIT || ''
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [remoteBuild, setRemoteBuild] = useState(null)
+  const [remoteCommit, setRemoteCommit] = useState(null)
   const [checking, setChecking] = useState(false)
 
   const checkForUpdate = useCallback(async () => {
-    if (!embeddedBuild) return
     setChecking(true)
     try {
       const res = await fetch(`/version.json?t=${Date.now()}`, {
@@ -35,39 +38,57 @@ export function useAppUpdate () {
       if (!res.ok) return
       const data = await res.json()
       const remote = data?.build || ''
+      const commit = data?.commit || ''
       setRemoteBuild(remote)
-      const stored = getStoredBuild()
-      if (!stored) {
-        setStoredBuild(embeddedBuild)
+      setRemoteCommit(commit)
+
+      if (embeddedBuild) {
+        const stored = getStoredBuild()
+        if (!stored) setStoredBuild(embeddedBuild, embeddedCommit)
       }
-      if (remote && remote !== embeddedBuild) {
+
+      const buildMismatch = remote && embeddedBuild && remote !== embeddedBuild
+      const commitMismatch = commit && embeddedCommit && commit !== embeddedCommit
+      const legacyApp = !embeddedBuild || !embeddedCommit
+
+      if (legacyApp || buildMismatch || commitMismatch) {
         setUpdateAvailable(true)
+      } else {
+        setUpdateAvailable(false)
       }
     } catch {
       /* offline or dev without version.json */
     } finally {
       setChecking(false)
     }
-  }, [embeddedBuild])
+  }, [embeddedBuild, embeddedCommit])
 
   useEffect(() => {
-    if (embeddedBuild) {
-      const stored = getStoredBuild()
-      if (!stored) setStoredBuild(embeddedBuild)
-    }
     checkForUpdate()
-    const interval = setInterval(checkForUpdate, 5 * 60 * 1000)
+    const interval = setInterval(checkForUpdate, 2 * 60 * 1000)
     return () => clearInterval(interval)
-  }, [embeddedBuild, checkForUpdate])
+  }, [checkForUpdate])
 
-  const applyUpdate = useCallback(() => {
-    if (remoteBuild) setStoredBuild(remoteBuild)
-    window.location.reload()
-  }, [remoteBuild])
+  const applyUpdate = useCallback(async () => {
+    if (remoteBuild) setStoredBuild(remoteBuild, remoteCommit)
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map((k) => caches.delete(k)))
+      }
+    } catch {
+      /* ignore */
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.set('_refresh', String(Date.now()))
+    window.location.replace(url.toString())
+  }, [remoteBuild, remoteCommit])
 
   return {
     embeddedBuild,
+    embeddedCommit,
     remoteBuild,
+    remoteCommit,
     updateAvailable,
     checking,
     applyUpdate,
