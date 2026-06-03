@@ -38,9 +38,7 @@ function openPdfDocument ({ title, filename, fetchPdf, mode = 'view', debounceKe
     title,
     filename,
     fetchPdf,
-    mode,
-    autoPrint: mode === 'print',
-    autoSave: mode === 'download'
+    mode
   })
   return true
 }
