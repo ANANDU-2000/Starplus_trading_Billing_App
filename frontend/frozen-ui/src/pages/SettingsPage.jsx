@@ -24,6 +24,7 @@ import { LoadingCard } from '../components/Loading'
 import { adminAPI } from '../services'
 import toast from 'react-hot-toast'
 import { triggerBlobDownload } from '../utils/blobDownload'
+import PdfPrintTester from '../components/PdfPrintTester'
 
 const SettingsPage = () => {
   const { user } = useAuth()
@@ -445,6 +446,7 @@ const SettingsPage = () => {
             { id: 'company', label: 'Company' },
             { id: 'invoice', label: 'Invoice' },
             { id: 'logo', label: 'Logo' },
+            { id: 'pdf', label: 'PDF & Printing' },
             { id: 'backup', label: 'Backup' },
             { id: 'cloud', label: 'Cloud' },
           ].map((tab) => (
@@ -653,6 +655,25 @@ const SettingsPage = () => {
         )}
 
         {/* Cloud Backup Settings (Admin Only) */}
+        {activeTab === 'pdf' && (
+          <div className="bg-white rounded-lg shadow p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">PDF &amp; Printing (Tablet)</h2>
+            <p className="text-sm text-gray-600">
+              Run the tester on your Honor/Android tablet before using POS Print or Ledger Print PDF.
+            </p>
+            <PdfPrintTester user={user} />
+            <div className="text-sm text-gray-600 space-y-2 border-t pt-4">
+              <p className="font-medium text-gray-800">If PDF still fails:</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Remove app from home screen (if installed as PWA)</li>
+                <li>Chrome → Site settings → Clear data for this site</li>
+                <li>Reopen starplustrading.netlify.app and log in again</li>
+                <li>Run PDF test above — all checks should be green</li>
+              </ol>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'cloud' && user?.role?.toLowerCase() === 'admin' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="flex items-center mb-6">

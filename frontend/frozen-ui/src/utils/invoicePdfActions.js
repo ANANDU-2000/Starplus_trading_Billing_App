@@ -7,6 +7,18 @@ import {
   printPdfBlob,
   needsBlobPdfFlow
 } from './blobDownload'
+import {
+  mobilePrintPdf,
+  mobileViewPdf,
+  toastPrintResult
+} from './pdfMobile'
+import {
+  getInvoicePdfUrl,
+  getReceiptPdfUrl,
+  getStatementPdfUrl,
+  getPendingBillsPdfUrl
+} from './pdfUrls'
+import { getDownloadHintText } from './pdfHints'
 import { parseApiErrorBlobMessage, validatePdfBlob } from './pdfBlob'
 import { getCachedInvoicePdf, setCachedInvoicePdf } from './pdfBlobCache'
 
@@ -38,8 +50,8 @@ function shouldDebounce (key) {
   return false
 }
 
-function openPdfDocument ({ title, filename, fetchPdf, mode = 'view' }) {
-  if (!fetchPdf) {
+function openPdfDocument ({ title, filename, fetchPdf, mode = 'view', directUrl = null }) {
+  if (!fetchPdf && !directUrl) {
     toast.error('Cannot open PDF')
     return false
   }
@@ -47,7 +59,8 @@ function openPdfDocument ({ title, filename, fetchPdf, mode = 'view' }) {
     title,
     filename,
     fetchPdf,
-    mode
+    mode,
+    directUrl
   })
   return true
 }
@@ -63,7 +76,7 @@ async function fetchAndValidate (fetchPdf) {
 }
 
 /**
- * Shared PDF action: view opens modal; print/download run directly (one tap).
+ * Shared PDF action: view opens modal (desktop) or direct URL (mobile); print/download one tap.
  */
 async function runPdfAction ({
   title,
@@ -71,6 +84,7 @@ async function runPdfAction ({
   fetchPdf,
   action,
   debounceKey,
+  getDirectUrl,
   openModalOnFailure = true
 }) {
   if (debounceKey && shouldDebounce(debounceKey)) {
@@ -79,8 +93,15 @@ async function runPdfAction ({
   }
   if (debounceKey) markDebounce(debounceKey)
 
+  const directUrl = getDirectUrl?.({ print: action === 'print', open: action === 'view' }) || null
+  const isMobile = needsBlobPdfFlow()
+
   if (action === 'view') {
-    return openPdfDocument({ title, filename, fetchPdf, mode: 'view' })
+    if (isMobile && directUrl && mobileViewPdf({ directUrl })) {
+      toast('PDF opened in Chrome', { duration: 4000 })
+      return true
+    }
+    return openPdfDocument({ title, filename, fetchPdf, mode: 'view', directUrl })
   }
 
   const toastId = toast.loading('Preparing PDF…')
@@ -88,23 +109,25 @@ async function runPdfAction ({
     const typed = await fetchAndValidate(fetchPdf)
 
     if (action === 'print') {
-      const ok = await printPdfBlob(typed)
+      let result
+      if (isMobile) {
+        result = await mobilePrintPdf({ blob: typed, filename, directUrl })
+      } else {
+        result = await printPdfBlob(typed)
+      }
       toast.dismiss(toastId)
-      if (ok) {
-        if (needsBlobPdfFlow()) {
-          toast('PDF opened — use ⋮ → Print in the PDF tab', { duration: 6000 })
-        } else {
-          toast.success('Print dialog opened')
-        }
+      if (result.ok) {
+        toastPrintResult(result, toast)
         return true
       }
-      toast.error('Could not print directly — opening PDF viewer')
-      if (openModalOnFailure) {
+      toast.error('Could not print — try Save to device first')
+      if (openModalOnFailure && !isMobile) {
         openPdfDocument({
           title,
           filename,
           fetchPdf: () => Promise.resolve(typed),
-          mode: 'print'
+          mode: 'print',
+          directUrl
         })
       }
       return false
@@ -117,9 +140,12 @@ async function runPdfAction ({
       if (result === 'picker' || result === 'share') {
         toast.success('PDF saved — check Files or Downloads')
       } else if (result === 'download') {
-        toast.success('PDF saved to downloads')
+        toast.success(getDownloadHintText())
+      } else if (result === 'tab' && directUrl) {
+        mobileViewPdf({ directUrl })
+        toast(getDownloadHintText(), { duration: 6000, icon: 'ℹ️' })
       } else {
-        toast('PDF opened — Share → Save to Files', { duration: 6000 })
+        toast(getDownloadHintText(), { duration: 6000, icon: 'ℹ️' })
       }
       return true
     }
@@ -127,8 +153,11 @@ async function runPdfAction ({
     toast.dismiss(toastId)
     const msg = await parseApiErrorBlobMessage(err, 'Failed to load PDF')
     toast.error(msg)
-    if (openModalOnFailure && (action === 'print' || action === 'download')) {
-      openPdfDocument({ title, filename, fetchPdf, mode: action })
+    if (openModalOnFailure && !isMobile && (action === 'print' || action === 'download')) {
+      openPdfDocument({ title, filename, fetchPdf, mode: action, directUrl })
+    } else if (isMobile && directUrl && action === 'print') {
+      mobileViewPdf({ directUrl })
+      toast('PDF opened in Chrome — use ⋮ → Share → Print', { duration: 8000 })
     }
     return false
   }
@@ -148,9 +177,9 @@ export async function saveValidatedPdfBlob (blob, filename) {
   if (result === 'picker' || result === 'share') {
     toast.success('PDF saved — check Files or Downloads')
   } else if (result === 'download') {
-    toast.success('PDF saved to downloads')
+    toast.success(getDownloadHintText())
   } else {
-    toast('PDF opened — Share → Save to Files', { duration: 6000 })
+    toast(getDownloadHintText(), { duration: 6000, icon: 'ℹ️' })
   }
   return result
 }
@@ -199,8 +228,10 @@ export function openInvoicePdfForPrint (saleId, invoiceNo) {
     title: `Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
     fetchPdf: invoicePdfFetcher(saleId),
+    getDirectUrl: (opts) => getInvoicePdfUrl(saleId, opts),
     action: 'print',
-    debounceKey: `print:invoice:${saleId}`
+    debounceKey: `print:invoice:${saleId}`,
+    openModalOnFailure: false
   })
   return true
 }
@@ -215,12 +246,14 @@ export function openInvoicePdfForViewing (saleId, invoiceNo) {
     return false
   }
   markDebounce(`view:invoice:${saleId}`)
-  return openPdfDocument({
+  void runPdfAction({
     title: `Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
     fetchPdf: invoicePdfFetcher(saleId),
-    mode: 'view'
+    getDirectUrl: (opts) => getInvoicePdfUrl(saleId, opts),
+    action: 'view'
   })
+  return true
 }
 
 export function downloadInvoicePdf (saleId, invoiceNo) {
@@ -232,8 +265,10 @@ export function downloadInvoicePdf (saleId, invoiceNo) {
     title: `Download — Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
     fetchPdf: invoicePdfFetcher(saleId),
+    getDirectUrl: (opts) => getInvoicePdfUrl(saleId, opts),
     action: 'download',
-    debounceKey: `download:invoice:${saleId}`
+    debounceKey: `download:invoice:${saleId}`,
+    openModalOnFailure: false
   })
   return true
 }
@@ -249,8 +284,10 @@ export function openReceiptPdfForPrint (receiptId, receiptNo) {
     title: `Receipt ${receiptNo || receiptId}`,
     filename: safeReceiptName(receiptId, receiptNo),
     fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+    getDirectUrl: (opts) => getReceiptPdfUrl(receiptId, opts),
     action: 'print',
-    debounceKey: `print:receipt:${receiptId}`
+    debounceKey: `print:receipt:${receiptId}`,
+    openModalOnFailure: false
   })
   return true
 }
@@ -265,12 +302,14 @@ export function openReceiptPdfForViewing (receiptId, receiptNo) {
     return false
   }
   markDebounce(`view:receipt:${receiptId}`)
-  return openPdfDocument({
+  void runPdfAction({
     title: `Receipt ${receiptNo || receiptId}`,
     filename: safeReceiptName(receiptId, receiptNo),
     fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
-    mode: 'view'
+    getDirectUrl: (opts) => getReceiptPdfUrl(receiptId, opts),
+    action: 'view'
   })
+  return true
 }
 
 export function downloadReceiptPdf (receiptId, receiptNo) {
@@ -282,8 +321,10 @@ export function downloadReceiptPdf (receiptId, receiptNo) {
     title: `Download — Receipt ${receiptNo || receiptId}`,
     filename: safeReceiptName(receiptId, receiptNo),
     fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+    getDirectUrl: (opts) => getReceiptPdfUrl(receiptId, opts),
     action: 'download',
-    debounceKey: `download:receipt:${receiptId}`
+    debounceKey: `download:receipt:${receiptId}`,
+    openModalOnFailure: false
   })
   return true
 }
@@ -299,8 +340,10 @@ export function openStatementPdfForPrint (customerId, fromDate, toDate, customer
     title: `Ledger Statement — ${customerName || 'Customer'}`,
     filename: safeStatementName(customerName, 'statement'),
     fetchPdf: () => customersAPI.getCustomerStatement(customerId, fromDate, toDate),
+    getDirectUrl: (opts) => getStatementPdfUrl(customerId, fromDate, toDate, opts),
     action: 'print',
-    debounceKey: `print:statement:${customerId}:${fromDate}:${toDate}`
+    debounceKey: `print:statement:${customerId}:${fromDate}:${toDate}`,
+    openModalOnFailure: false
   })
   return true
 }
@@ -314,8 +357,10 @@ export function openPendingBillsPdfForPrint (customerId, fromDate, toDate, custo
     title: `Pending Bills — ${customerName || 'Customer'}`,
     filename: safeStatementName(customerName, 'pending_bills'),
     fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
+    getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, fromDate, toDate, opts),
     action: 'print',
-    debounceKey: `print:pending:${customerId}:${fromDate}:${toDate}`
+    debounceKey: `print:pending:${customerId}:${fromDate}:${toDate}`,
+    openModalOnFailure: false
   })
   return true
 }
@@ -329,8 +374,10 @@ export function downloadStatementPdf (customerId, fromDate, toDate, customerName
     title: `Download Statement — ${customerName || 'Customer'}`,
     filename: safeStatementName(customerName, 'statement'),
     fetchPdf: () => customersAPI.getCustomerStatement(customerId, fromDate, toDate),
+    getDirectUrl: (opts) => getStatementPdfUrl(customerId, fromDate, toDate, opts),
     action: 'download',
-    debounceKey: `download:statement:${customerId}:${fromDate}:${toDate}`
+    debounceKey: `download:statement:${customerId}:${fromDate}:${toDate}`,
+    openModalOnFailure: false
   })
 }
 
@@ -343,8 +390,10 @@ export function downloadPendingBillsPdf (customerId, fromDate, toDate, customerN
     title: `Download Pending Bills — ${customerName || 'Customer'}`,
     filename: safeStatementName(customerName, 'pending_bills'),
     fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
+    getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, fromDate, toDate, opts),
     action: 'download',
-    debounceKey: `download:pending:${customerId}:${fromDate}:${toDate}`
+    debounceKey: `download:pending:${customerId}:${fromDate}:${toDate}`,
+    openModalOnFailure: false
   })
 }
 

@@ -14,6 +14,7 @@ import BottomNav from './BottomNav'
 import Logo from './Logo'
 import AlertNotifications from './AlertNotifications'
 import DesktopSidebar from './DesktopSidebar'
+import PdfPrintTester from './PdfPrintTester'
 import { getMainNavigation, isNavActive } from '../config/navigation'
 
 const Layout = () => {
@@ -161,6 +162,7 @@ const Layout = () => {
           </div>
         </div>
         {/* Page content */}
+        <PdfPrintTester adminOnly user={user} />
         <main className="flex-1 pb-20 lg:pb-6 pt-14 lg:pt-20">
           <div className="py-1 sm:py-2 lg:py-6">
             <div className="w-full px-2 sm:px-3 lg:px-4">

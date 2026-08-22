@@ -28,12 +28,14 @@ import {
   openInvoicePdfForPrint,
   openInvoicePdfForViewing,
   prefetchInvoicePdf,
-  getCachedInvoicePdf,
-  loadCachedInvoicePdfUrl
+  getCachedInvoicePdf
 } from '../utils/invoicePdfActions'
 import { clearCachedInvoicePdf } from '../utils/pdfBlobCache'
-import { savePdfToDevice, printPdfBlobWhenReady } from '../utils/blobDownload'
+import { needsBlobPdfFlow, openPdfDirectUrl } from '../utils/blobDownload'
+import { getInvoicePdfUrl } from '../utils/pdfUrls'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
+
+const isMobilePdf = needsBlobPdfFlow()
 
 const PosPage = () => {
   const navigate = useNavigate()
@@ -57,13 +59,9 @@ const PosPage = () => {
   const [loading, setLoading] = useState(false)
   const [showInvoiceOptionsModal, setShowInvoiceOptionsModal] = useState(false)
   const [lastCreatedInvoice, setLastCreatedInvoice] = useState(null)
-  const [posPdfPreviewUrl, setPosPdfPreviewUrl] = useState(null)
   const [posPdfLoading, setPosPdfLoading] = useState(false)
   const [posPdfError, setPosPdfError] = useState(null)
   const [posPdfReady, setPosPdfReady] = useState(false)
-  const [posPdfIframeReady, setPosPdfIframeReady] = useState(false)
-  const posPdfPreviewRef = useRef(null)
-  const posPdfUrlRef = useRef(null)
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('0001')
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingSaleId, setEditingSaleId] = useState(null)
@@ -515,13 +513,7 @@ const PosPage = () => {
   }
 
   const revokePosPdfPreview = useCallback(() => {
-    if (posPdfUrlRef.current) {
-      URL.revokeObjectURL(posPdfUrlRef.current)
-      posPdfUrlRef.current = null
-    }
-    setPosPdfPreviewUrl(null)
     setPosPdfReady(false)
-    setPosPdfIframeReady(false)
     setPosPdfError(null)
   }, [])
 
@@ -530,8 +522,6 @@ const PosPage = () => {
     setPosPdfLoading(true)
     setPosPdfError(null)
     setPosPdfReady(false)
-    setPosPdfIframeReady(false)
-    revokePosPdfPreview()
     try {
       const result = await prefetchInvoicePdf(saleId)
       if (!result.ok) {
@@ -539,9 +529,7 @@ const PosPage = () => {
         toast.error(result.error || 'Invoice PDF not ready — check connection and try View Invoice PDF')
         return
       }
-      const url = await loadCachedInvoicePdfUrl(saleId)
-      posPdfUrlRef.current = url
-      setPosPdfPreviewUrl(url)
+      setPosPdfReady(true)
     } catch (err) {
       const msg = err?.message || 'Failed to load invoice PDF'
       setPosPdfError(msg)
@@ -549,7 +537,7 @@ const PosPage = () => {
     } finally {
       setPosPdfLoading(false)
     }
-  }, [revokePosPdfPreview])
+  }, [])
 
   useEffect(() => {
     if (!showInvoiceOptionsModal || !lastCreatedInvoice?.id) {
@@ -578,52 +566,22 @@ const PosPage = () => {
     runPosPdfAction(openInvoicePdfForViewing)
   }
 
-  const handlePrintInvoicePdf = async () => {
-    if (!lastCreatedInvoice?.id) return
-    if (!posPdfReady || !posPdfIframeReady) {
-      toast.error(posPdfError || 'PDF not loaded yet')
-      return
-    }
-    const blob = getCachedInvoicePdf(lastCreatedInvoice.id)
-    if (!blob) {
-      runPosPdfAction(openInvoicePdfForPrint)
-      return
-    }
-    const ok = await printPdfBlobWhenReady(blob, posPdfPreviewRef.current)
-    if (ok) {
-      toast.success('Print dialog opened — print the tax invoice PDF shown above')
-    } else {
-      setShowInvoiceOptionsModal(false)
-      openInvoicePdfForPrint(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)
-    }
+  const handlePrintInvoicePdf = () => {
+    runPosPdfAction(openInvoicePdfForPrint)
   }
 
-  const handleSaveInvoicePdf = async () => {
+  const handleSaveInvoicePdf = () => {
+    runPosPdfAction(downloadInvoicePdf)
+  }
+
+  const handleOpenPosPdfInChrome = () => {
     if (!lastCreatedInvoice?.id) return
-    if (!posPdfReady) {
-      toast.error(posPdfError || 'PDF not loaded yet')
-      return
+    const url = getInvoicePdfUrl(lastCreatedInvoice.id, { open: true })
+    if (openPdfDirectUrl(url)) {
+      toast('PDF opened in Chrome', { duration: 4000 })
+    } else {
+      toast.error('Could not open PDF — allow popups')
     }
-    const blob = getCachedInvoicePdf(lastCreatedInvoice.id)
-    const invoiceNo = lastCreatedInvoice.invoiceNo || lastCreatedInvoice.id
-    const fname = `INV-${String(invoiceNo).replace(/[^\w.-]+/g, '_')}.pdf`
-    if (!blob) {
-      runPosPdfAction(downloadInvoicePdf)
-      return
-    }
-    const result = await savePdfToDevice(blob, fname)
-    if (result === 'cancelled') return
-    if (result === 'picker' || result === 'share') {
-      toast.success('PDF saved — open Files or Downloads to find it')
-      return
-    }
-    if (result === 'download') {
-      toast.success('PDF saved to your downloads folder')
-      return
-    }
-    setShowInvoiceOptionsModal(false)
-    downloadInvoicePdf(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)
-    toast('Choose Save to device in the PDF viewer', { duration: 5000, icon: 'i' })
   }
 
   const queueInvoicePdfPrefetch = (saleId) => {
@@ -2174,22 +2132,19 @@ const PosPage = () => {
                   </button>
                 </div>
               )}
-              {posPdfPreviewUrl && !posPdfLoading && (
-                <iframe
-                  ref={posPdfPreviewRef}
-                  title="Invoice PDF"
-                  src={posPdfPreviewUrl}
-                  onLoad={() => {
-                    setPosPdfIframeReady(true)
-                    setPosPdfReady(true)
-                  }}
-                  className="w-full h-[40vh] min-h-[220px] border rounded bg-white"
-                />
-              )}
-              {posPdfReady && posPdfIframeReady && (
+              {posPdfReady && !posPdfLoading && (
                 <p className="text-xs text-green-700 font-medium">
-                  PDF loaded — this is the real invoice. Use buttons below (not browser Print).
+                  PDF ready from server — use buttons below (opens real PDF in Chrome on tablet).
                 </p>
+              )}
+              {isMobilePdf && posPdfReady && !posPdfLoading && (
+                <button
+                  type="button"
+                  onClick={handleOpenPosPdfInChrome}
+                  className="w-full flex items-center justify-center px-4 py-2 border border-indigo-300 text-indigo-800 rounded-lg text-sm font-medium"
+                >
+                  Open PDF in Chrome
+                </button>
               )}
 
               {/* Action Buttons */}
@@ -2206,7 +2161,7 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handlePrintInvoicePdf}
-                  disabled={!posPdfReady || !posPdfIframeReady || posPdfLoading}
+                  disabled={!posPdfReady || posPdfLoading}
                   className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
                 >
                   <Printer className="h-5 w-5 mr-2" />
@@ -2216,7 +2171,7 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handleSaveInvoicePdf}
-                  disabled={!posPdfReady || !posPdfIframeReady || posPdfLoading}
+                  disabled={!posPdfReady || posPdfLoading}
                   className="w-full flex items-center justify-center px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors shadow-md disabled:opacity-50"
                 >
                   <Download className="h-5 w-5 mr-2" />

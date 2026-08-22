@@ -10,21 +10,23 @@ export const usePdfDocumentStore = create((set) => ({
   title: 'Document',
   filename: 'document.pdf',
   fetchPdf: null,
-  /** UI hint only — never auto-triggers print/save (caused blank page print dialog) */
+  directUrl: null,
   mode: 'view',
 
   openPdfDocument: ({
     title = 'Document',
     filename = 'document.pdf',
     fetchPdf,
+    directUrl = null,
     mode = 'view'
   }) => {
-    if (!fetchPdf) return
+    if (!fetchPdf && !directUrl) return
     set({
       isOpen: true,
       title,
       filename,
       fetchPdf,
+      directUrl,
       mode
     })
   },
@@ -32,6 +34,7 @@ export const usePdfDocumentStore = create((set) => ({
   closePdfDocument: () => set({
     isOpen: false,
     fetchPdf: null,
+    directUrl: null,
     mode: 'view'
   })
 }))

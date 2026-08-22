@@ -29,6 +29,21 @@ export function triggerBlobDownload (blob, filename, { revokeDelayMs } = {}) {
 }
 
 /**
+ * Open a direct HTTPS PDF URL (server-generated). Works reliably on Android Chrome.
+ */
+export function openPdfDirectUrl (url) {
+  if (!url) return false
+  try {
+    const w = window.open(url, '_blank', 'noopener,noreferrer')
+    if (w) return true
+    window.location.assign(url)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Open PDF blob in a new tab (works on tablet/PWA when direct API URL fails).
  */
 export function openPdfBlobInViewer (blob, { revokeDelayMs } = {}) {
@@ -244,74 +259,68 @@ export async function shareOrSavePdfBlob (blob, filename) {
   return savePdfToDevice(blob, filename)
 }
 
-/**
- * Print the real PDF (not the HTML app page).
- * Uses preview iframe when ready, else hidden iframe, else new tab on mobile.
- */
+/** @returns {Promise<{ ok: boolean, method: 'dialog'|'tab'|'failed'|'cancelled' }>} */
 export async function printPdfBlobWhenReady (blob, previewIframe) {
-  if (!blob || blob.size === 0) return false
+  if (!blob || blob.size === 0) return { ok: false, method: 'failed' }
+
+  if (needsBlobPdfFlow()) {
+    return { ok: false, method: 'failed' }
+  }
 
   if (previewIframe) {
     const ready = await waitForIframeReady(previewIframe)
-    if (ready && tryPrintIframe(previewIframe)) return true
+    if (ready && tryPrintIframe(previewIframe)) {
+      return { ok: true, method: 'dialog' }
+    }
   }
 
   return printPdfBlob(blob, { previewIframe: null })
 }
 
 /**
- * Print the real PDF (not the HTML app page).
+ * Print the real PDF (desktop). Mobile should use pdfMobile.mobilePrintPdf with direct URLs.
+ * @returns {Promise<{ ok: boolean, method: 'dialog'|'tab'|'failed' }>}
  */
 export function printPdfBlob (blob, { previewIframe = null } = {}) {
   return new Promise((resolve) => {
     if (!blob || blob.size === 0) {
-      resolve(false)
+      resolve({ ok: false, method: 'failed' })
       return
     }
 
     const typed = toPdfBlob(blob)
-    let printed = false
+    let finished = false
 
-    const finish = (ok) => {
-      if (printed) return
-      printed = true
-      resolve(ok)
+    const finish = (result) => {
+      if (finished) return
+      finished = true
+      resolve(result)
+    }
+
+    const runDesktop = () => {
+      printViaHiddenIframe(typed).then((dialogOk) => {
+        if (dialogOk) {
+          finish({ ok: true, method: 'dialog' })
+          return
+        }
+        tryWindowPrint(typed, (winOk) => {
+          finish(winOk ? { ok: true, method: 'dialog' } : { ok: false, method: 'failed' })
+        })
+      })
     }
 
     if (previewIframe?.contentWindow) {
       waitForIframeReady(previewIframe).then((ready) => {
         if (ready && tryPrintIframe(previewIframe)) {
-          finish(true)
+          finish({ ok: true, method: 'dialog' })
           return
         }
-        printViaHiddenIframe(typed).then((ok) => {
-          if (ok) {
-            finish(true)
-            return
-          }
-          if (needsBlobPdfFlow()) {
-            openPdfBlobInViewer(typed)
-            finish(true)
-            return
-          }
-          tryWindowPrint(typed, finish)
-        })
+        runDesktop()
       })
       return
     }
 
-    printViaHiddenIframe(typed).then((ok) => {
-      if (ok) {
-        finish(true)
-        return
-      }
-      if (needsBlobPdfFlow()) {
-        openPdfBlobInViewer(typed)
-        finish(true)
-        return
-      }
-      tryWindowPrint(typed, finish)
-    })
+    runDesktop()
   })
 }
 

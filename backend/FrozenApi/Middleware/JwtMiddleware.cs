@@ -32,7 +32,8 @@ namespace FrozenApi.Middleware
 
         public async Task InvokeAsync(HttpContext context)
         {
-            var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
+            var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last()
+                ?? context.Request.Query["access_token"].FirstOrDefault();
 
             if (token != null)
             {

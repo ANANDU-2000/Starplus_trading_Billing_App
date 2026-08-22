@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { X, Download, Printer, Loader2 } from 'lucide-react'
+import { X, Download, Printer, Loader2, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { usePdfDocumentStore } from '../stores/pdfDocumentStore'
 import { validatePdfBlob, parseApiErrorBlobMessage } from '../utils/pdfBlob'
 import {
   savePdfToDevice,
   printPdfBlobWhenReady,
-  isTouchOrTabletDevice,
+  needsBlobPdfFlow,
+  openPdfDirectUrl
 } from '../utils/blobDownload'
+import { mobilePrintPdf, toastPrintResult } from '../utils/pdfMobile'
+import { getPrintHintText, isHonorOrAndroid } from '../utils/pdfHints'
 
 export default function PdfDocumentModal () {
   const {
@@ -15,6 +18,7 @@ export default function PdfDocumentModal () {
     title,
     filename,
     fetchPdf,
+    directUrl,
     mode,
     closePdfDocument
   } = usePdfDocumentStore()
@@ -29,6 +33,8 @@ export default function PdfDocumentModal () {
   const previewIframeRef = useRef(null)
   const previewUrlRef = useRef(null)
   const autoActionDoneRef = useRef(false)
+
+  const isMobile = needsBlobPdfFlow()
 
   const revokePreview = useCallback(() => {
     if (previewUrlRef.current) {
@@ -62,10 +68,12 @@ export default function PdfDocumentModal () {
         throw new Error(check.message || 'Invalid PDF')
       }
       const typed = new Blob([check.blob], { type: 'application/pdf' })
-      const url = URL.createObjectURL(typed)
-      previewUrlRef.current = url
+      if (!isMobile) {
+        const url = URL.createObjectURL(typed)
+        previewUrlRef.current = url
+        setPreviewUrl(url)
+      }
       setBlob(typed)
-      setPreviewUrl(url)
     } catch (err) {
       console.error('[PdfDocumentModal]', err)
       const msg = await parseApiErrorBlobMessage(err, 'Failed to load PDF')
@@ -74,13 +82,22 @@ export default function PdfDocumentModal () {
     } finally {
       setLoading(false)
     }
-  }, [fetchPdf, revokePreview])
+  }, [fetchPdf, revokePreview, isMobile])
 
   useEffect(() => {
-    if (!isOpen || !fetchPdf) return
-    loadPdf()
+    if (!isOpen) return
+    if (fetchPdf) loadPdf()
     return () => revokePreview()
   }, [isOpen, fetchPdf, loadPdf, revokePreview])
+
+  const handleOpenInChrome = useCallback(() => {
+    const url = directUrl || previewUrl
+    if (url && openPdfDirectUrl(url)) {
+      toast('PDF opened in Chrome', { duration: 4000 })
+      return
+    }
+    toast.error('Could not open PDF')
+  }, [directUrl, previewUrl])
 
   const handleSave = useCallback(async () => {
     if (!blob) return
@@ -96,51 +113,58 @@ export default function PdfDocumentModal () {
         toast.success('PDF saved to downloads folder')
         return
       }
-      toast('PDF opened — use Share → Save to Files', { duration: 6000, icon: 'i' })
+      handleOpenInChrome()
+      toast('Share → Save to Files', { duration: 6000, icon: 'ℹ️' })
     } catch (err) {
       toast.error(err?.message || 'Could not save PDF')
     } finally {
       setSaving(false)
     }
-  }, [blob, filename])
+  }, [blob, filename, handleOpenInChrome])
 
   const handlePrint = useCallback(async () => {
-    if (!blob) return
+    if (!blob && !directUrl) return
     setPrinting(true)
     try {
-      const ok = await printPdfBlobWhenReady(blob, previewIframeRef.current)
-      if (!ok) {
-        toast.error('Could not open print. Save the PDF first, then print from your file manager.')
-      } else if (isTouchOrTabletDevice()) {
-        toast('PDF opened — use ⋮ → Print in the PDF tab', { duration: 6000 })
+      if (isMobile) {
+        const result = await mobilePrintPdf({ blob, filename, directUrl })
+        toastPrintResult(result, toast)
+        return
+      }
+      const result = await printPdfBlobWhenReady(blob, previewIframeRef.current)
+      if (result.ok) {
+        toastPrintResult(result, toast)
       } else {
-        toast.success('Print the PDF shown in the preview or new tab — not this screen')
+        toast.error('Could not open print. Save the PDF first, then print from your file manager.')
       }
     } catch (err) {
       toast.error(err?.message || 'Print failed')
     } finally {
       setPrinting(false)
     }
-  }, [blob])
+  }, [blob, filename, directUrl, isMobile])
 
-  // Auto print or save when opened via print/download mode (one tap from caller fallback)
+  // Auto print or save on mobile/desktop when opened via print/download mode
   useEffect(() => {
-    if (!blob || !iframeReady || loading || error || autoActionDoneRef.current) return
+    if (!blob || loading || error || autoActionDoneRef.current) return
     if (mode !== 'print' && mode !== 'download') return
+    if (!isMobile && !iframeReady) return
     autoActionDoneRef.current = true
     if (mode === 'print') {
       void handlePrint()
     } else {
       void handleSave()
     }
-  }, [blob, iframeReady, loading, error, mode, handlePrint, handleSave])
+  }, [blob, iframeReady, loading, error, mode, handlePrint, handleSave, isMobile])
 
   if (!isOpen) return null
 
-  const touchHint = isTouchOrTabletDevice()
   const emphasizePrint = mode === 'print'
   const emphasizeSave = mode === 'download'
-  const actionsReady = blob && iframeReady && !loading
+  const actionsReady = blob && !loading && (isMobile || iframeReady)
+  const hintText = isHonorOrAndroid()
+    ? 'Tap Open PDF → ⋮ → Share → Print (Honor tablets may not show Print in the menu)'
+    : getPrintHintText()
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-2 sm:p-4 print:hidden">
@@ -167,7 +191,23 @@ export default function PdfDocumentModal () {
           {error && !loading && (
             <div className="p-6 text-red-600 text-center">{error}</div>
           )}
-          {!loading && !error && previewUrl && (
+          {!loading && !error && blob && isMobile && (
+            <div className="flex flex-col items-center justify-center h-full min-h-[40vh] gap-4 p-6 text-center">
+              <p className="text-sm text-gray-700">
+                Your <strong>real PDF</strong> is ready from the server.
+              </p>
+              <button
+                type="button"
+                onClick={handleOpenInChrome}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold text-base"
+              >
+                <ExternalLink className="h-5 w-5" />
+                Open PDF in Chrome
+              </button>
+              <p className="text-xs text-gray-500 max-w-sm">{hintText}</p>
+            </div>
+          )}
+          {!loading && !error && previewUrl && !isMobile && (
             <iframe
               ref={previewIframeRef}
               title={title}
@@ -181,31 +221,40 @@ export default function PdfDocumentModal () {
         {!loading && !error && blob && (
           <p className="px-4 py-2 text-sm text-gray-800 bg-green-50 border-t border-green-200 font-medium">
             This is your <strong>real PDF</strong> from the server — not the app screen.
-            {emphasizeSave && !iframeReady && ' Preparing save…'}
-            {emphasizePrint && !iframeReady && ' Preparing print…'}
           </p>
         )}
 
-        {touchHint && !loading && !error && blob && (
+        {isMobile && !loading && !error && blob && (
           <p className="px-4 py-2 text-xs text-gray-600 bg-amber-50 border-t border-amber-100">
-            On mobile: Save → Share → Files. Print → use Print PDF when ready, or ⋮ → Print in the PDF tab.
+            {hintText}
           </p>
         )}
 
-        {!touchHint && !loading && !error && blob && (
+        {!isMobile && !loading && !error && blob && (
           <p className="px-4 py-2 text-xs text-gray-600 bg-blue-50 border-t border-blue-100">
             Do not use browser Ctrl+P on the app — use <strong>Print PDF</strong> in this window.
           </p>
         )}
 
         <div className="flex flex-wrap gap-2 p-3 sm:p-4 border-t bg-gray-50 shrink-0">
+          {isMobile && (
+            <button
+              type="button"
+              onClick={handleOpenInChrome}
+              disabled={!actionsReady}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg disabled:opacity-50 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Open in Chrome
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSave}
             disabled={!actionsReady || saving}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-lg disabled:opacity-50 text-sm font-medium ${
               emphasizeSave
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                ? 'bg-blue-600 text-white hover:bg-blue-700 ring-2 ring-blue-400'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
