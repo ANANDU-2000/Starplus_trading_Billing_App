@@ -31,7 +31,7 @@ import {
   getCachedInvoicePdf
 } from '../utils/invoicePdfActions'
 import { clearCachedInvoicePdf } from '../utils/pdfBlobCache'
-import { needsBlobPdfFlow, openPdfDirectUrl } from '../utils/blobDownload'
+import { needsBlobPdfFlow, openPdfDirectUrl, savePdfToDevice } from '../utils/blobDownload'
 import { getInvoicePdfUrl } from '../utils/pdfUrls'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
 
@@ -548,15 +548,17 @@ const PosPage = () => {
     return () => revokePosPdfPreview()
   }, [showInvoiceOptionsModal, lastCreatedInvoice?.id, loadPosInvoicePdfPreview, revokePosPdfPreview])
 
-  const runPosPdfAction = (action) => {
+  const runPosPdfAction = (action, { skipLoadingCheck = false } = {}) => {
     if (!lastCreatedInvoice?.id) {
       toast.error('No invoice available.')
       return
     }
-    const cached = getCachedInvoicePdf(lastCreatedInvoice.id)
-    if (!cached && posPdfLoading) {
-      toast.error(posPdfError || 'Invoice PDF is still loading. Please wait.')
-      return
+    if (!skipLoadingCheck) {
+      const cached = getCachedInvoicePdf(lastCreatedInvoice.id)
+      if (!cached && posPdfLoading) {
+        toast.error(posPdfError || 'Invoice PDF is still loading. Please wait.')
+        return
+      }
     }
     setShowInvoiceOptionsModal(false)
     action(lastCreatedInvoice.id, lastCreatedInvoice.invoiceNo)
@@ -567,7 +569,7 @@ const PosPage = () => {
   }
 
   const handlePrintInvoicePdf = () => {
-    runPosPdfAction(openInvoicePdfForPrint)
+    runPosPdfAction(openInvoicePdfForPrint, { skipLoadingCheck: true })
   }
 
   const handleSaveInvoicePdf = () => {
@@ -2161,8 +2163,7 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handlePrintInvoicePdf}
-                  disabled={!posPdfReady || posPdfLoading}
-                  className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
+                  className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md"
                 >
                   <Printer className="h-5 w-5 mr-2" />
                   Print Invoice PDF

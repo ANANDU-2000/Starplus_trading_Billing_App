@@ -118,21 +118,69 @@ function tryWindowPrintUrl (url) {
 }
 
 /**
- * Print a server-generated PDF URL directly — primary path for tablet/mobile.
+ * Open PDF URL synchronously inside click handler (keeps user gesture for print).
+ */
+export function beginDirectPrint (url) {
+  if (!url) return null
+  try {
+    return window.open(url, '_blank')
+  } catch {
+    return null
+  }
+}
+
+function schedulePrintOnWindow (printWin) {
+  if (!printWin) return
+  const runPrint = () => {
+    try {
+      printWin.focus()
+      printWin.print()
+    } catch {
+      /* cross-origin or not ready */
+    }
+  }
+  setTimeout(runPrint, 600)
+  setTimeout(runPrint, 1500)
+  setTimeout(runPrint, 3000)
+}
+
+/**
+ * Print a server-generated PDF URL directly — primary path for all devices.
+ * Pass preOpenedWin from beginDirectPrint() for instant one-tap print.
  * @returns {Promise<{ ok: boolean, method: 'dialog'|'tab'|'failed' }>}
  */
-export async function printPdfDirectUrl (url) {
+export async function printPdfDirectUrl (url, preOpenedWin = null) {
   if (!url) return { ok: false, method: 'failed' }
+
+  if (preOpenedWin) {
+    schedulePrintOnWindow(preOpenedWin)
+    return { ok: true, method: 'dialog' }
+  }
+
+  // Try window first (fastest visible feedback on tablet)
+  const winOk = await tryWindowPrintUrl(url)
+  if (winOk) return { ok: true, method: 'dialog' }
 
   const iframeOk = await printViaHiddenIframeUrl(url)
   if (iframeOk) return { ok: true, method: 'dialog' }
 
-  const winOk = await tryWindowPrintUrl(url)
-  if (winOk) return { ok: true, method: 'dialog' }
-
-  // Last resort: open tab so user can print from Chrome PDF viewer
   const opened = openPdfDirectUrl(url)
   return opened ? { ok: true, method: 'tab' } : { ok: false, method: 'failed' }
+}
+
+/**
+ * One-tap print: open URL synchronously, then trigger print. No fetch, no modal.
+ */
+export function instantPrintPdfUrl (url) {
+  if (!url) {
+    return Promise.resolve({ ok: false, method: 'failed' })
+  }
+  const win = beginDirectPrint(url)
+  if (win) {
+    schedulePrintOnWindow(win)
+    return Promise.resolve({ ok: true, method: 'dialog' })
+  }
+  return printPdfDirectUrl(url)
 }
 
 /**

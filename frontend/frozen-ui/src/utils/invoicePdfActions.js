@@ -5,26 +5,23 @@ import {
   isStandalonePwaMode as checkStandalonePwa,
   savePdfToDevice,
   printPdfBlob,
-  printPdfDirectUrl,
-  needsBlobPdfFlow
+  instantPrintPdfUrl,
+  needsBlobPdfFlow,
+  openPdfDirectUrl
 } from './blobDownload'
-import {
-  mobilePrintPdf,
-  mobileViewPdf,
-  toastPrintResult
-} from './pdfMobile'
+import { mobileViewPdf, toastPrintResult } from './pdfMobile'
 import {
   getInvoicePdfUrl,
   getReceiptPdfUrl,
   getStatementPdfUrl,
   getPendingBillsPdfUrl
 } from './pdfUrls'
-import { getDownloadHintText } from './pdfHints'
+import { getDownloadHintText, getPrintHintText } from './pdfHints'
 import { parseApiErrorBlobMessage, validatePdfBlob } from './pdfBlob'
 import { getCachedInvoicePdf, setCachedInvoicePdf } from './pdfBlobCache'
 
 const recentOpenByKey = new Map()
-const DEBOUNCE_MS = 700
+const DEBOUNCE_MS = 400
 
 function safeInvoiceName (saleId, invoiceNo) {
   return `INV-${String(invoiceNo || saleId || 'invoice').replace(/[^\w.-]+/g, '_')}.pdf`
@@ -77,8 +74,43 @@ async function fetchAndValidate (fetchPdf) {
 }
 
 /**
- * Shared PDF action: view opens modal (desktop) or direct URL (mobile); print/download one tap.
+ * Instant print — one tap, no fetch, no modal, no loading spinner.
+ * Opens server PDF and triggers print dialog immediately.
  */
+function runInstantPrint ({ getDirectUrl, fetchPdf, filename }) {
+  const directUrl = getDirectUrl?.({ print: true })
+  if (!directUrl) {
+    toast.error('Cannot print — missing PDF URL')
+    return false
+  }
+
+  void instantPrintPdfUrl(directUrl).then(async (result) => {
+    if (result.ok && result.method === 'dialog') return
+
+    if (result.ok && result.method === 'tab') {
+      toast(getPrintHintText(), { duration: 5000, icon: 'ℹ️' })
+      return
+    }
+
+    // Rare fallback: validate blob then print
+    try {
+      const typed = await fetchAndValidate(fetchPdf)
+      const blobResult = await printPdfBlob(typed)
+      if (blobResult.ok) {
+        toastPrintResult(blobResult, toast)
+        return
+      }
+    } catch (err) {
+      const msg = await parseApiErrorBlobMessage(err, 'Print failed')
+      toast.error(msg)
+      return
+    }
+    toast.error('Print failed — allow popups for this site')
+  })
+
+  return true
+}
+
 async function runPdfAction ({
   title,
   filename,
@@ -88,61 +120,37 @@ async function runPdfAction ({
   getDirectUrl,
   openModalOnFailure = true
 }) {
+  if (action === 'print') {
+    if (debounceKey && shouldDebounce(debounceKey)) {
+      toast('Opening print…', { duration: 1500 })
+      return false
+    }
+    if (debounceKey) markDebounce(debounceKey)
+    return runInstantPrint({ getDirectUrl, fetchPdf, filename })
+  }
+
   if (debounceKey && shouldDebounce(debounceKey)) {
-    toast('Please wait — PDF is opening', { duration: 2000 })
+    toast('Please wait…', { duration: 1500 })
     return false
   }
   if (debounceKey) markDebounce(debounceKey)
 
-  const directUrl = getDirectUrl?.({ print: action === 'print', open: action === 'view' }) || null
+  const directUrl = getDirectUrl?.({ print: false, open: action === 'view' }) || null
   const isMobile = needsBlobPdfFlow()
 
   if (action === 'view') {
+    if (directUrl && openPdfDirectUrl(directUrl)) {
+      return true
+    }
     if (isMobile && directUrl && mobileViewPdf({ directUrl })) {
-      toast('PDF opened in Chrome', { duration: 4000 })
       return true
     }
     return openPdfDocument({ title, filename, fetchPdf, mode: 'view', directUrl })
   }
 
-  const toastId = toast.loading(action === 'print' ? 'Opening print…' : 'Preparing PDF…')
+  const toastId = toast.loading('Preparing PDF…')
   try {
-    // Fast path: print server PDF URL immediately (keeps user gesture for print dialog)
-    if (action === 'print' && isMobile && directUrl) {
-      const fast = await printPdfDirectUrl(directUrl)
-      if (fast.ok && fast.method === 'dialog') {
-        toast.dismiss(toastId)
-        toastPrintResult(fast, toast)
-        return true
-      }
-    }
-
     const typed = await fetchAndValidate(fetchPdf)
-
-    if (action === 'print') {
-      let result
-      if (isMobile) {
-        result = await mobilePrintPdf({ blob: typed, filename, directUrl })
-      } else {
-        result = await printPdfBlob(typed)
-      }
-      toast.dismiss(toastId)
-      if (result.ok) {
-        toastPrintResult(result, toast)
-        return true
-      }
-      toast.error('Could not print — try Save to device first')
-      if (openModalOnFailure && !isMobile) {
-        openPdfDocument({
-          title,
-          filename,
-          fetchPdf: () => Promise.resolve(typed),
-          mode: 'print',
-          directUrl
-        })
-      }
-      return false
-    }
 
     if (action === 'download') {
       const result = await savePdfToDevice(typed, filename, { directUrl })
@@ -152,11 +160,8 @@ async function runPdfAction ({
         toast.success('PDF saved — check Files or Downloads')
       } else if (result === 'download') {
         toast.success(getDownloadHintText())
-      } else if (result === 'tab' && directUrl) {
-        mobileViewPdf({ directUrl })
-        toast(getDownloadHintText(), { duration: 6000, icon: 'ℹ️' })
       } else {
-        toast(getDownloadHintText(), { duration: 6000, icon: 'ℹ️' })
+        toast(getDownloadHintText(), { duration: 5000, icon: 'ℹ️' })
       }
       return true
     }
@@ -164,11 +169,8 @@ async function runPdfAction ({
     toast.dismiss(toastId)
     const msg = await parseApiErrorBlobMessage(err, 'Failed to load PDF')
     toast.error(msg)
-    if (openModalOnFailure && !isMobile && (action === 'print' || action === 'download')) {
+    if (openModalOnFailure && !isMobile) {
       openPdfDocument({ title, filename, fetchPdf, mode: action, directUrl })
-    } else if (isMobile && directUrl && action === 'print') {
-      mobileViewPdf({ directUrl })
-      toast('PDF opened in Chrome — use ⋮ → Share → Print', { duration: 8000 })
     }
     return false
   }
@@ -177,20 +179,20 @@ async function runPdfAction ({
 }
 
 /** Download or save a blob that was already fetched (reports pages). */
-export async function saveValidatedPdfBlob (blob, filename) {
+export async function saveValidatedPdfBlob (blob, filename, { directUrl } = {}) {
   const check = await validatePdfBlob(blob instanceof Blob ? blob : new Blob([blob]))
   if (!check.ok) {
     throw new Error(check.message || 'Invalid PDF')
   }
   const typed = new Blob([check.blob], { type: 'application/pdf' })
-  const result = await savePdfToDevice(typed, filename)
+  const result = await savePdfToDevice(typed, filename, { directUrl })
   if (result === 'cancelled') return 'cancelled'
   if (result === 'picker' || result === 'share') {
     toast.success('PDF saved — check Files or Downloads')
   } else if (result === 'download') {
     toast.success(getDownloadHintText())
   } else {
-    toast(getDownloadHintText(), { duration: 6000, icon: 'ℹ️' })
+    toast(getDownloadHintText(), { duration: 5000, icon: 'ℹ️' })
   }
   return result
 }
@@ -204,7 +206,7 @@ async function fetchInvoicePdfValidated (saleId) {
   return typed
 }
 
-/** Prefetch after POS sale — speeds up View/Print/Save on tablet */
+/** Prefetch after POS sale — optional background cache (print does not wait for this). */
 export async function prefetchInvoicePdf (saleId) {
   if (!saleId) return { ok: false, error: 'No sale id' }
   try {
@@ -222,7 +224,7 @@ export async function loadCachedInvoicePdfUrl (saleId) {
   return URL.createObjectURL(blob)
 }
 
-export { fetchInvoicePdfValidated, getCachedInvoicePdf }
+export { fetchInvoicePdfValidated, getCachedInvoicePdf, instantPrintPdfUrl }
 
 function invoicePdfFetcher (saleId) {
   return () => fetchInvoicePdfValidated(saleId)
@@ -235,16 +237,11 @@ export function openInvoicePdfForPrint (saleId, invoiceNo) {
     toast.error('Invalid sale ID. Cannot print invoice.')
     return false
   }
-  void runPdfAction({
-    title: `Invoice ${invoiceNo || saleId}`,
-    filename: safeInvoiceName(saleId, invoiceNo),
-    fetchPdf: invoicePdfFetcher(saleId),
+  return runInstantPrint({
     getDirectUrl: (opts) => getInvoicePdfUrl(saleId, opts),
-    action: 'print',
-    debounceKey: `print:invoice:${saleId}`,
-    openModalOnFailure: false
+    fetchPdf: invoicePdfFetcher(saleId),
+    filename: safeInvoiceName(saleId, invoiceNo)
   })
-  return true
 }
 
 export function openInvoicePdfForViewing (saleId, invoiceNo) {
@@ -252,11 +249,6 @@ export function openInvoicePdfForViewing (saleId, invoiceNo) {
     toast.error('Invalid sale ID. Cannot open invoice.')
     return false
   }
-  if (shouldDebounce(`view:invoice:${saleId}`)) {
-    toast('Please wait — PDF is opening', { duration: 2000 })
-    return false
-  }
-  markDebounce(`view:invoice:${saleId}`)
   void runPdfAction({
     title: `Invoice ${invoiceNo || saleId}`,
     filename: safeInvoiceName(saleId, invoiceNo),
@@ -291,16 +283,11 @@ export function openReceiptPdfForPrint (receiptId, receiptNo) {
     toast.error('Invalid receipt ID. Cannot print receipt.')
     return false
   }
-  void runPdfAction({
-    title: `Receipt ${receiptNo || receiptId}`,
-    filename: safeReceiptName(receiptId, receiptNo),
-    fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+  return runInstantPrint({
     getDirectUrl: (opts) => getReceiptPdfUrl(receiptId, opts),
-    action: 'print',
-    debounceKey: `print:receipt:${receiptId}`,
-    openModalOnFailure: false
+    fetchPdf: () => paymentsAPI.getReceiptPdf(receiptId),
+    filename: safeReceiptName(receiptId, receiptNo)
   })
-  return true
 }
 
 export function openReceiptPdfForViewing (receiptId, receiptNo) {
@@ -308,11 +295,6 @@ export function openReceiptPdfForViewing (receiptId, receiptNo) {
     toast.error('Invalid receipt ID. Cannot open receipt.')
     return false
   }
-  if (shouldDebounce(`view:receipt:${receiptId}`)) {
-    toast('Please wait — PDF is opening', { duration: 2000 })
-    return false
-  }
-  markDebounce(`view:receipt:${receiptId}`)
   void runPdfAction({
     title: `Receipt ${receiptNo || receiptId}`,
     filename: safeReceiptName(receiptId, receiptNo),
@@ -347,16 +329,11 @@ export function openStatementPdfForPrint (customerId, fromDate, toDate, customer
     toast.error('Please select a customer first.')
     return false
   }
-  void runPdfAction({
-    title: `Ledger Statement — ${customerName || 'Customer'}`,
-    filename: safeStatementName(customerName, 'statement'),
-    fetchPdf: () => customersAPI.getCustomerStatement(customerId, fromDate, toDate),
+  return runInstantPrint({
     getDirectUrl: (opts) => getStatementPdfUrl(customerId, fromDate, toDate, opts),
-    action: 'print',
-    debounceKey: `print:statement:${customerId}:${fromDate}:${toDate}`,
-    openModalOnFailure: false
+    fetchPdf: () => customersAPI.getCustomerStatement(customerId, fromDate, toDate),
+    filename: safeStatementName(customerName, 'statement')
   })
-  return true
 }
 
 export function openPendingBillsPdfForPrint (customerId, fromDate, toDate, customerName) {
@@ -364,16 +341,11 @@ export function openPendingBillsPdfForPrint (customerId, fromDate, toDate, custo
     toast.error('Please select a customer first.')
     return false
   }
-  void runPdfAction({
-    title: `Pending Bills — ${customerName || 'Customer'}`,
-    filename: safeStatementName(customerName, 'pending_bills'),
-    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
+  return runInstantPrint({
     getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, fromDate, toDate, opts),
-    action: 'print',
-    debounceKey: `print:pending:${customerId}:${fromDate}:${toDate}`,
-    openModalOnFailure: false
+    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
+    filename: safeStatementName(customerName, 'pending_bills')
   })
-  return true
 }
 
 export function downloadStatementPdf (customerId, fromDate, toDate, customerName) {

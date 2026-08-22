@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Printer, CheckCircle, XCircle, Loader2 } from '
 import { salesAPI } from '../services'
 import { validatePdfBlob } from '../utils/pdfBlob'
 import { getHealthUrl, getInvoicePdfUrl } from '../utils/pdfUrls'
-import { openPdfDirectUrl, needsBlobPdfFlow, printPdfDirectUrl } from '../utils/blobDownload'
+import { openPdfDirectUrl, needsBlobPdfFlow, instantPrintPdfUrl } from '../utils/blobDownload'
 import { useAppUpdate } from '../hooks/useAppUpdate'
 import { isHonorOrAndroid } from '../utils/pdfHints'
 
@@ -84,7 +84,7 @@ export default function PdfPrintTester ({ adminOnly = false, user }) {
 
         if (check.ok) {
           const url = getInvoicePdfUrl(saleId, { print: true })
-          const printResult = await printPdfDirectUrl(url)
+          const printResult = await instantPrintPdfUrl(url)
           out.directUrl.ok = printResult.ok
           out.directUrl.detail = printResult.method === 'dialog'
             ? 'Print dialog triggered for server PDF'

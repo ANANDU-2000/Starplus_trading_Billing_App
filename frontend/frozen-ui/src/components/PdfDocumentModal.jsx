@@ -7,9 +7,9 @@ import {
   savePdfToDevice,
   printPdfBlobWhenReady,
   needsBlobPdfFlow,
-  openPdfDirectUrl
+  openPdfDirectUrl,
+  instantPrintPdfUrl
 } from '../utils/blobDownload'
-import { mobilePrintPdf, toastPrintResult } from '../utils/pdfMobile'
 import { getPrintHintText, isHonorOrAndroid } from '../utils/pdfHints'
 
 export default function PdfDocumentModal () {
@@ -126,23 +126,29 @@ export default function PdfDocumentModal () {
     if (!blob && !directUrl) return
     setPrinting(true)
     try {
-      if (isMobile) {
-        const result = await mobilePrintPdf({ blob, filename, directUrl })
-        toastPrintResult(result, toast)
+      if (directUrl) {
+        const result = await instantPrintPdfUrl(directUrl)
+        if (result.ok && result.method === 'tab') {
+          toast(getPrintHintText(), { duration: 5000, icon: 'ℹ️' })
+        } else if (!result.ok) {
+          toast.error('Print failed — allow popups for this site')
+        }
         return
       }
-      const result = await printPdfBlobWhenReady(blob, previewIframeRef.current)
+      const result = await printPdfBlobWhenReady(blob, previewIframeRef.current, directUrl)
       if (result.ok) {
-        toastPrintResult(result, toast)
+        if (result.method === 'tab') {
+          toast(getPrintHintText(), { duration: 5000, icon: 'ℹ️' })
+        }
       } else {
-        toast.error('Could not open print. Save the PDF first, then print from your file manager.')
+        toast.error('Could not open print.')
       }
     } catch (err) {
       toast.error(err?.message || 'Print failed')
     } finally {
       setPrinting(false)
     }
-  }, [blob, filename, directUrl, isMobile])
+  }, [blob, directUrl])
 
   // Auto print or save on mobile/desktop when opened via print/download mode
   useEffect(() => {
