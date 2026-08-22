@@ -17,6 +17,7 @@ namespace FrozenApi.Services
         Task<List<Alert>> GetAlertsAsync(bool unreadOnly = false, int limit = 50);
         Task<Alert?> GetAlertByIdAsync(int id);
         Task MarkAsReadAsync(int id);
+        Task MarkAllAsReadAsync();
         Task MarkAsResolvedAsync(int id, int userId);
         Task<int> GetUnreadCountAsync();
         Task CheckAndCreateAlertsAsync(); // Background job to check for conditions
@@ -143,6 +144,25 @@ namespace FrozenApi.Services
                 alert.ReadAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
             }
+        }
+
+        public async Task MarkAllAsReadAsync()
+        {
+            var unread = await _context.Alerts
+                .Where(a => !a.IsRead)
+                .ToListAsync();
+
+            if (unread.Count == 0)
+                return;
+
+            var now = DateTime.UtcNow;
+            foreach (var alert in unread)
+            {
+                alert.IsRead = true;
+                alert.ReadAt = now;
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         public async Task MarkAsResolvedAsync(int id, int userId)

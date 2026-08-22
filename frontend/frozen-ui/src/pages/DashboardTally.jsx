@@ -1,19 +1,24 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { 
   Package, ShoppingCart, Users, Truck, CreditCard, FileText,
   Settings, Database, BarChart3, DollarSign, TrendingUp,
-  AlertTriangle, RefreshCw, LogOut, Menu, X, ChevronRight,
-  Bell, HardDrive, TrendingDown, BookOpen, Wallet
+  AlertTriangle, RefreshCw, LogOut, ChevronRight,
+  HardDrive, TrendingDown, BookOpen, Wallet
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
-import { reportsAPI, alertsAPI } from '../services'
+import { reportsAPI } from '../services'
+import DesktopSidebar from '../components/DesktopSidebar'
+import BottomNav from '../components/BottomNav'
+import AlertNotifications from '../components/AlertNotifications'
+import { getGatewayMenu } from '../config/navigation'
 
 const DashboardTally = () => {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
     salesToday: 0,
@@ -28,12 +33,6 @@ const DashboardTally = () => {
     invoicesWeekly: 0,
     invoicesMonthly: 0
   })
-  const [sidebarExpanded, setSidebarExpanded] = useState(true)
-  const [unreadAlertsCount, setUnreadAlertsCount] = useState(0)
-  const [showAlertsModal, setShowAlertsModal] = useState(false)
-  const [alerts, setAlerts] = useState([])
-
-  // Request throttling for dashboard
   const lastFetchTimeRef = useRef(0)
   const isFetchingRef = useRef(false)
   const fetchTimeoutRef = useRef(null)
@@ -74,18 +73,6 @@ const DashboardTally = () => {
     
     // Declare intervals at the top level
     let interval = null
-    let alertsInterval = null
-    
-    // Fetch alerts count (admin only)
-    if (user?.role?.toLowerCase() === 'admin') {
-      fetchAlertsCount()
-      // Refresh alerts count every 30 seconds
-      alertsInterval = setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          fetchAlertsCount()
-        }
-      }, 30000)
-    }
     
     // Auto-refresh every 2 minutes (increased from 30 seconds)
     interval = setInterval(() => {
@@ -117,9 +104,6 @@ const DashboardTally = () => {
     return () => {
       if (interval) {
         clearInterval(interval)
-      }
-      if (alertsInterval) {
-        clearInterval(alertsInterval)
       }
       if (fetchTimeoutRef.current) {
         clearTimeout(fetchTimeoutRef.current)
@@ -184,75 +168,21 @@ const DashboardTally = () => {
     }
   }
 
-  const fetchAlerts = async () => {
-    try {
-      const response = await alertsAPI.getAlerts()
-      if (response.success) {
-        setAlerts(response.data || [])
-      }
-    } catch (error) {
-      console.error('Failed to fetch alerts:', error)
-    }
-  }
-
-  const fetchAlertsCount = async () => {
-    try {
-      const response = await alertsAPI.getUnreadCount()
-      if (response.success) {
-        setUnreadAlertsCount(response.data || 0)
-      }
-    } catch (error) {
-      console.error('Failed to fetch alerts count:', error)
-    }
-  }
-
-  const gatewayMenu = [
-    {
-      title: 'MASTERS',
-      items: [
-        { icon: Package, label: 'Products', path: '/products', shortcut: 'F1' }
-      ]
-    },
-    {
-      title: 'TRANSACTIONS',
-      items: [
-        { icon: ShoppingCart, label: 'POS Billing', path: '/pos', shortcut: 'F3', primary: true },
-        { icon: Truck, label: 'Purchases', path: '/purchases', shortcut: 'F4' },
-        { icon: FileText, label: 'Expenses', path: '/expenses', shortcut: 'F5' },
-        { icon: FileText, label: 'Customer Ledger', path: '/ledger', shortcut: 'F6' },
-        { icon: FileText, label: 'Sales Ledger', path: '/sales-ledger', shortcut: 'F10' }
-      ]
-    },
-    {
-      title: 'REPORTS',
-      items: [
-        { icon: BarChart3, label: 'Sales Report', path: '/reports?tab=sales', shortcut: 'F7' },
-        { icon: TrendingUp, label: 'Profit & Loss', path: '/reports?tab=profit-loss', shortcut: 'F8' },
-        { icon: DollarSign, label: 'Outstanding Bills', path: '/reports?tab=outstanding', shortcut: 'F9' }
-      ]
-    },
-    {
-      title: 'UTILITIES',
-      items: [
-        { icon: Settings, label: 'Settings', path: '/settings', shortcut: 'Ctrl+S', adminOnly: true },
-        { icon: Database, label: 'Backup & Restore', path: '/backup', shortcut: 'Ctrl+B', adminOnly: true },
-        { icon: Users, label: 'Users', path: '/users', shortcut: 'Ctrl+U', adminOnly: true }
-      ]
-    }
-  ]
+  const gatewayMenu = getGatewayMenu(user)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-50 pb-20 lg:pb-0">
+      <DesktopSidebar
+        user={user}
+        pathname={location.pathname}
+        onLogout={logout}
+        activeHref="/dashboard"
+      />
+      <div className="lg:pl-20">
       {/* Top Header Bar - Mobile Responsive */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 text-white shadow-lg">
         <div className="flex items-center justify-between px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 lg:py-3">
           <div className="flex items-center space-x-1.5 sm:space-x-2 flex-1 min-w-0">
-            <button
-              onClick={() => setSidebarExpanded(!sidebarExpanded)}
-              className="p-1 sm:p-1.5 hover:bg-blue-700 rounded-lg transition flex-shrink-0 cursor-pointer"
-            >
-              <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
-            </button>
             <div className="min-w-0 flex-1">
               <h1 className="text-xs sm:text-sm lg:text-base xl:text-lg font-bold truncate">STARPLUS FOODSTUFF TRADING</h1>
               <p className="text-[9px] sm:text-[10px] text-blue-200 hidden sm:block">Frozen Food Trading & Management System</p>
@@ -294,21 +224,7 @@ const DashboardTally = () => {
             )}
             {/* Alerts Notification Icon */}
             {user?.role?.toLowerCase() === 'admin' && (
-              <button
-                onClick={async () => {
-                  await fetchAlerts()
-                  setShowAlertsModal(true)
-                }}
-                className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-blue-700 rounded-lg transition flex items-center justify-center"
-                title="Alerts & Notifications"
-              >
-                <Bell className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
-                {unreadAlertsCount > 0 && (
-                  <span className="absolute -top-1 -right-1 h-5 w-5 sm:h-6 sm:w-6 bg-red-500 rounded-full border-2 border-blue-900 flex items-center justify-center">
-                    <span className="text-[10px] sm:text-xs font-bold text-white">{unreadAlertsCount > 9 ? '9+' : unreadAlertsCount}</span>
-                  </span>
-                )}
-              </button>
+              <AlertNotifications />
             )}
             <div className="text-right hidden md:block">
               <p className="text-[10px] sm:text-xs font-medium">{new Date().toLocaleDateString('en-GB', { 
@@ -330,35 +246,8 @@ const DashboardTally = () => {
         </div>
       </div>
 
-      {/* Main Layout: Sidebar + Gateway - Mobile Responsive */}
+      {/* Main Layout: Content + Gateway */}
       <div className="flex flex-col lg:flex-row">
-          {/* Left Slim Icon Sidebar - Hidden on mobile, overlay on tablet */}
-        {sidebarExpanded && (
-          <div className="hidden lg:block w-14 xl:w-16 bg-blue-800 text-white shadow-2xl">
-            <div className="flex flex-col h-[calc(100vh-80px)] lg:h-[calc(100vh-96px)]">
-              <div className="p-1 sm:p-1.5 space-y-0.5 sm:space-y-1">
-                <NavIcon icon={BarChart3} label="Dashboard" active onClick={() => navigate('/dashboard')} />
-                <NavIcon icon={Package} label="Products" onClick={() => navigate('/products')} />
-                <NavIcon icon={Truck} label="Purchases" onClick={() => navigate('/purchases')} />
-                <NavIcon icon={ShoppingCart} label="POS" onClick={() => navigate('/pos')} />
-                <NavIcon icon={FileText} label="Customer Ledger" onClick={() => navigate('/ledger')} />
-                <NavIcon icon={FileText} label="Expenses" onClick={() => navigate('/expenses')} />
-                <NavIcon icon={FileText} label="Sales Ledger" onClick={() => navigate('/sales-ledger')} />
-                <NavIcon icon={BarChart3} label="Reports" onClick={() => navigate('/reports')} />
-                <NavIcon icon={Settings} label="Settings" onClick={() => navigate('/settings')} />
-              </div>
-              <div className="mt-auto p-1 sm:p-1.5 space-y-0.5 sm:space-y-1 border-t border-blue-700">
-                <div className="text-center">
-                  <div className="h-6 w-6 sm:h-8 sm:w-8 bg-blue-700 rounded-full mx-auto flex items-center justify-center mb-0.5">
-                    <span className="text-[10px] sm:text-xs font-bold">{user?.name?.[0] || 'U'}</span>
-                  </div>
-                  <p className="text-[9px] sm:text-[10px] truncate">{user?.name || 'User'}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Central Content + Right Gateway Column */}
         <div className="flex-1 flex flex-col lg:flex-row">
           {/* Left: Stats & Quick Actions */}
@@ -501,132 +390,13 @@ const DashboardTally = () => {
           </div>
         </div>
       </div>
-
-      {/* Alerts Modal - Improved UI */}
-      {showAlertsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm" onClick={() => setShowAlertsModal(false)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-              <div className="flex items-center space-x-3">
-                <Bell className="h-6 w-6" />
-                <h2 className="text-xl font-bold">Alerts & Notifications</h2>
-                {unreadAlertsCount > 0 && (
-                  <span className="bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">
-                    {unreadAlertsCount} New
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => setShowAlertsModal(false)}
-                className="p-2 hover:bg-blue-800 rounded-lg transition"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-5 bg-gray-50">
-              {alerts.length === 0 ? (
-                <div className="text-center py-12">
-                  <Bell className="h-16 w-16 mx-auto text-gray-300 mb-4" />
-                  <p className="text-lg text-gray-500 font-medium">No alerts</p>
-                  <p className="text-sm text-gray-400 mt-2">You're all caught up!</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {alerts.map((alert) => (
-                    <div
-                      key={alert.id}
-                      className={`p-4 rounded-lg border-2 shadow-sm transition-all hover:shadow-md ${
-                        alert.isRead 
-                          ? 'bg-white border-gray-200' 
-                          : 'bg-blue-50 border-blue-300 shadow-md'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            {!alert.isRead && (
-                              <span className="h-2 w-2 bg-blue-600 rounded-full flex-shrink-0"></span>
-                            )}
-                            <h3 className={`font-bold ${alert.isRead ? 'text-gray-700' : 'text-gray-900'}`}>
-                              {alert.title}
-                            </h3>
-                          </div>
-                          {alert.message && (
-                            <p className={`text-sm mt-1 ${alert.isRead ? 'text-gray-600' : 'text-gray-700'}`}>
-                              {alert.message}
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-500 mt-3">
-                            {new Date(alert.createdAt).toLocaleString('en-GB', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </p>
-                        </div>
-                        <div className="flex flex-col gap-2 flex-shrink-0">
-                          {!alert.isRead && (
-                            <button
-                              onClick={async () => {
-                                await alertsAPI.markAsRead(alert.id)
-                                await fetchAlerts()
-                                await fetchAlertsCount()
-                              }}
-                              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium whitespace-nowrap"
-                            >
-                              Mark Read
-                            </button>
-                          )}
-                          {!alert.isResolved && (
-                            <button
-                              onClick={async () => {
-                                await alertsAPI.markAsResolved(alert.id)
-                                await fetchAlerts()
-                                await fetchAlertsCount()
-                              }}
-                              className="text-xs px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium whitespace-nowrap"
-                            >
-                              Resolve
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="p-4 bg-gray-100 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setShowAlertsModal(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition font-medium"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
+      <div className="lg:hidden">
+        <BottomNav />
+      </div>
     </div>
   )
 }
-
-const NavIcon = ({ icon: Icon, label, active, onClick }) => (
-  <button
-    onClick={onClick}
-    className={`w-full p-1.5 sm:p-2 rounded-lg transition-all hover:bg-blue-700 group relative ${
-      active ? 'bg-blue-700' : ''
-    }`}
-    title={label}
-  >
-    <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5 mx-auto" />
-    <span className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none z-50 whitespace-nowrap">
-      {label}
-    </span>
-  </button>
-)
 
 const StatCard = ({ title, value, icon: Icon, color, loading, adminOnly }) => {
   const colorClasses = {

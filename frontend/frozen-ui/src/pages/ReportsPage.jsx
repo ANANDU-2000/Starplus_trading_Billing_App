@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { 
   Download, 
   Filter, 
@@ -87,7 +87,7 @@ const ReportsPage = () => {
     { id: 'sales', name: 'Sales Report', icon: TrendingUp },
     { id: 'products', name: 'Product Analysis', icon: PieChart },
     { id: 'customers', name: 'Customer Report', icon: FileText },
-    { id: 'expenses', name: 'Expenses', icon: TrendingDown },
+    { id: 'expenses', name: 'Expense Analysis', icon: TrendingDown },
     { id: 'profit-loss', name: 'Profit & Loss', icon: TrendingUp },
     { id: 'outstanding', name: 'Outstanding Bills', icon: DollarSign },
     { id: 'ai', name: 'AI Insights', icon: Eye }
@@ -1363,6 +1363,15 @@ const ReportsPage = () => {
           {/* Expenses Tab */}
           {activeTab === 'expenses' && (
             <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <p className="text-sm text-gray-600">Expense breakdown for the selected report period.</p>
+                <Link
+                  to="/expenses"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                >
+                  Manage expenses →
+                </Link>
+              </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white border border-gray-200 rounded-lg p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Expense Breakdown by Category</h3>

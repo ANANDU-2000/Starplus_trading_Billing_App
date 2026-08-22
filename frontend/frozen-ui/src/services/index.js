@@ -721,6 +721,10 @@ export const alertsAPI = {
     const response = await api.post(`/alerts/${id}/read`)
     return response.data
   },
+  markAllRead: async () => {
+    const response = await api.post('/alerts/mark-all-read')
+    return response.data
+  },
   markAsResolved: async (id) => {
     const response = await api.post(`/alerts/${id}/resolve`)
     return response.data

@@ -103,6 +103,31 @@ namespace FrozenApi.Controllers
             }
         }
 
+        [HttpPost("mark-all-read")]
+        public async Task<ActionResult<ApiResponse<int>>> MarkAllAsRead()
+        {
+            try
+            {
+                var count = await _alertService.GetUnreadCountAsync();
+                await _alertService.MarkAllAsReadAsync();
+                return Ok(new ApiResponse<int>
+                {
+                    Success = true,
+                    Message = "All alerts marked as read",
+                    Data = count
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse<int>
+                {
+                    Success = false,
+                    Message = "An error occurred",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpPost("{id}/read")]
         public async Task<ActionResult<ApiResponse<bool>>> MarkAsRead(int id)
         {

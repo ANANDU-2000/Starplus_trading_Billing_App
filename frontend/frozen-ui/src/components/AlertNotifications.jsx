@@ -85,6 +85,18 @@ const AlertNotifications = () => {
     }
   }
 
+  const handleMarkAllRead = async () => {
+    try {
+      await alertsAPI.markAllRead()
+      setAlerts(alerts.map(a => ({ ...a, isRead: true })))
+      setUnreadCount(0)
+      toast.success('All notifications marked as read')
+    } catch (error) {
+      console.error('Failed to mark all as read:', error)
+      toast.error('Failed to mark all as read')
+    }
+  }
+
   const handleMarkAsResolved = async (alertId) => {
     try {
       await alertsAPI.markAsResolved(alertId)
@@ -158,20 +170,33 @@ const AlertNotifications = () => {
           />
           
           {/* Panel */}
-          <div className="absolute right-0 mt-2 w-96 max-w-sm bg-white rounded-lg shadow-2xl z-50 max-h-[600px] flex flex-col">
+          <div className="absolute right-0 mt-2 w-96 max-w-[calc(100vw-1rem)] bg-white rounded-lg shadow-2xl z-50 max-h-[min(85vh,calc(100vh-5rem))] flex flex-col min-h-0">
             {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 sticky top-0 bg-white z-10 shrink-0">
               <h3 className="text-lg font-bold text-gray-900">Notifications</h3>
-              <button
-                onClick={() => setShowPanel(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50"
+                  >
+                    Mark all read
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowPanel(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                  aria-label="Close notifications"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             {/* Alerts List */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -210,7 +235,7 @@ const AlertNotifications = () => {
                               {alert.title}
                             </p>
                             {alert.message && (
-                              <p className="text-xs text-gray-600 mb-2">
+                              <p className="text-xs text-gray-600 mb-2 line-clamp-2">
                                 {alert.message}
                               </p>
                             )}

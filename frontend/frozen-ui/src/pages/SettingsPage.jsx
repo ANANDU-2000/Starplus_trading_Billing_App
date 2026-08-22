@@ -27,6 +27,7 @@ import { triggerBlobDownload } from '../utils/blobDownload'
 
 const SettingsPage = () => {
   const { user } = useAuth()
+  const [activeTab, setActiveTab] = useState('company')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [logoPreview, setLogoPreview] = useState(null)
@@ -423,7 +424,7 @@ const SettingsPage = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col min-h-0 space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -438,8 +439,34 @@ const SettingsPage = () => {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+      <div className="border-b border-gray-200 bg-white rounded-t-lg sticky top-0 z-10">
+        <div className="flex overflow-x-auto scrollbar-hide">
+          {[
+            { id: 'company', label: 'Company' },
+            { id: 'invoice', label: 'Invoice' },
+            { id: 'logo', label: 'Logo' },
+            { id: 'backup', label: 'Backup' },
+            { id: 'cloud', label: 'Cloud' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
+                activeTab === tab.id
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 flex-1 min-h-0">
         {/* Company Information */}
+        {activeTab === 'company' && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center mb-6">
             <Building2 className="h-6 w-6 text-blue-600 mr-3" />
@@ -495,8 +522,10 @@ const SettingsPage = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Logo Upload */}
+        {activeTab === 'logo' && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center mb-6">
             <Image className="h-6 w-6 text-blue-600 mr-3" />
@@ -551,8 +580,10 @@ const SettingsPage = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Business Settings */}
+        {activeTab === 'company' && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center mb-6">
             <DollarSign className="h-6 w-6 text-blue-600 mr-3" />
@@ -583,8 +614,10 @@ const SettingsPage = () => {
             />
           </div>
         </div>
+        )}
 
         {/* Invoice Template */}
+        {activeTab === 'invoice' && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center mb-6">
             <Globe className="h-6 w-6 text-blue-600 mr-3" />
@@ -617,9 +650,10 @@ const SettingsPage = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Cloud Backup Settings (Admin Only) */}
-        {user?.role?.toLowerCase() === 'admin' && (
+        {activeTab === 'cloud' && user?.role?.toLowerCase() === 'admin' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="flex items-center mb-6">
               <Globe className="h-6 w-6 text-purple-600 mr-3" />
@@ -681,7 +715,7 @@ const SettingsPage = () => {
         )}
 
         {/* Backup & Restore Section (Admin Only) */}
-        {user?.role?.toLowerCase() === 'admin' && (
+        {activeTab === 'backup' && user?.role?.toLowerCase() === 'admin' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="mb-6">
               <div className="flex items-center mb-4">
@@ -795,6 +829,7 @@ const SettingsPage = () => {
         )}
 
         {/* Save Button */}
+        {activeTab !== 'backup' && (
         <div className="flex justify-end">
           <LoadingButton
             type="submit"
@@ -805,6 +840,7 @@ const SettingsPage = () => {
             Save Settings
           </LoadingButton>
         </div>
+        )}
       </form>
 
       {/* Logo Upload Modal */}

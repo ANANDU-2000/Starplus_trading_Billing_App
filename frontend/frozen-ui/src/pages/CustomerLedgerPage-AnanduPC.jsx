@@ -49,6 +49,7 @@ import {
   openReceiptPdfForPrint,
   downloadReceiptPdf
 } from '../utils/invoicePdfActions'
+import { saveLedgerSession, loadLedgerSession, formatLedgerPeriod } from '../utils/ledgerSession'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
@@ -74,6 +75,7 @@ const CustomerLedgerPage = () => {
   const [filteredCustomers, setFilteredCustomers] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [searchFocused, setSearchFocused] = useState(false)
   
   // Customer data
   const [customerLedger, setCustomerLedger] = useState([])
@@ -205,9 +207,38 @@ const CustomerLedgerPage = () => {
     fetchCustomers()
   }, [])
 
+  // Restore ledger session (dates, tab, filters) on mount
+  useEffect(() => {
+    const saved = loadLedgerSession()
+    if (saved?.dateFrom && saved?.dateTo) {
+      setDateRange({ from: saved.dateFrom, to: saved.dateTo })
+    }
+    if (saved?.activeTab) {
+      setActiveTab(saved.activeTab)
+    }
+    if (saved?.ledgerFilters) {
+      setLedgerFilters(saved.ledgerFilters)
+    }
+  }, [])
+
+  // Persist ledger session for back-navigation from POS
+  useEffect(() => {
+    saveLedgerSession({
+      customerId: selectedCustomer?.id ?? null,
+      dateFrom: dateRange.from,
+      dateTo: dateRange.to,
+      activeTab,
+      ledgerFilters
+    })
+  }, [selectedCustomer?.id, dateRange.from, dateRange.to, activeTab, ledgerFilters])
+
   // Load customer from URL parameter
   useEffect(() => {
     const customerIdParam = searchParams.get('customerId')
+    if (customerIdParam === 'cash') {
+      setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
+      return
+    }
     if (customerIdParam) {
       const customerId = parseInt(customerIdParam)
       if (!isNaN(customerId)) {
@@ -225,6 +256,21 @@ const CustomerLedgerPage = () => {
       }
     }
   }, [searchParams, customers])
+
+  // Restore selected customer from session when URL has no customerId
+  useEffect(() => {
+    if (searchParams.get('customerId') || customers.length === 0 || selectedCustomer) return
+    const saved = loadLedgerSession()
+    if (!saved?.customerId) return
+    if (saved.customerId === 'cash') {
+      setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
+      return
+    }
+    const customer = customers.find(c => c.id === saved.customerId)
+    if (customer) {
+      setSelectedCustomer(customer)
+    }
+  }, [customers, searchParams, selectedCustomer])
 
   // Load customer data when selected (debounced to prevent excessive calls).
   // Intentionally does NOT depend on showReceiptModal/selectedPaymentIds so opening/closing receipt modal does not trigger reload.
@@ -838,8 +884,14 @@ const CustomerLedgerPage = () => {
     setSelectedPaymentIds([])
     setSelectedCustomer(customer)
     setSearchTerm('')
+    setSearchFocused(false)
     validationToastShownRef.current = { balance: null, paymentIntegrity: null }
     recalcJustRanRef.current = null
+    if (customer?.id === 'cash') {
+      setSearchParams({ customerId: 'cash' }, { replace: true })
+    } else if (customer?.id) {
+      setSearchParams({ customerId: String(customer.id) }, { replace: true })
+    }
   }
 
   const handleAddCustomer = async (data) => {
@@ -1300,7 +1352,7 @@ const CustomerLedgerPage = () => {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden max-w-full">
+    <div className="min-h-0 flex-1 flex flex-col bg-gray-50 overflow-hidden max-w-full">
       {/* TOP BAR - Header - Responsive */}
       <div className="bg-white border-b-2 border-gray-300 px-3 sm:px-6 py-2 sm:py-3 shadow-sm">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
@@ -1385,6 +1437,8 @@ const CustomerLedgerPage = () => {
               placeholder="Search Customer (F2)"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
               className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -1413,15 +1467,12 @@ const CustomerLedgerPage = () => {
         </div>
 
         {/* CUSTOMER SELECTION DROPDOWN (if search active or no customer selected) */}
-        {(searchTerm || !selectedCustomer) && (
-          <div className="bg-white border-b border-gray-200 max-h-[50vh] overflow-y-auto">
+        {(searchTerm || searchFocused || !selectedCustomer) && (
+          <div className="bg-white border-b border-gray-200 flex-1 min-h-0 overflow-y-auto">
             <div className="p-2 space-y-1">
               {/* Cash Customer Option */}
               <button
-                onClick={() => {
-                  setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
-                  loadCustomerData('cash')
-                }}
+                onClick={() => handleSelectCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })}
                 className={`w-full text-left p-2 rounded-lg transition-colors text-sm ${
                   selectedCustomer?.id === 'cash'
                     ? 'bg-blue-600 text-white'
@@ -1435,7 +1486,7 @@ const CustomerLedgerPage = () => {
               </button>
               
               {/* Regular Customers */}
-              {filteredCustomers.length > 0 && filteredCustomers.slice(0, 10).map((customer) => (
+              {filteredCustomers.length > 0 && filteredCustomers.map((customer) => (
                 <button
                   key={customer.id}
                   onClick={() => handleSelectCustomer(customer)}
@@ -1456,9 +1507,9 @@ const CustomerLedgerPage = () => {
         )}
 
         {/* MAIN LEDGER VIEW */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {!selectedCustomer ? (
-            <div className="flex-1 flex items-center justify-center py-8">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          {!selectedCustomer && !searchTerm && !searchFocused ? (
+            <div className="flex-1 flex items-center justify-center py-8 min-h-0">
               <div className="text-center max-w-sm">
                 <Users className="h-12 w-12 mx-auto mb-3 text-gray-400" />
                 <p className="text-base font-medium text-gray-600">Search and select a customer to view ledger</p>
@@ -1588,7 +1639,7 @@ const CustomerLedgerPage = () => {
               </div>
 
               {/* Date Range Filter - Compact */}
-              <div className="bg-gray-50 border-b border-gray-200 px-3 py-1.5 flex items-center gap-3">
+              <div className="bg-gray-50 border-b border-gray-200 px-3 py-1.5 flex items-center gap-3 flex-wrap">
                 <label className="text-sm font-medium text-gray-700">Date Range:</label>
                 <Input
                   type="date"
@@ -1603,6 +1654,9 @@ const CustomerLedgerPage = () => {
                   onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
                   className="w-40"
                 />
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                  {formatLedgerPeriod(dateRange.from, dateRange.to)}
+                </span>
               </div>
 
               {/* TAB SECTIONS - Full Width - Mobile Optimized */}
@@ -1698,8 +1752,10 @@ const CustomerLedgerPage = () => {
                         openInvoicePdfForPrint(invoiceId, inv?.invoiceNo)
                       }}
                       onEditInvoice={(invoiceId) => {
-                        // Navigate to POS with edit mode using React Router
-                        navigate(`/pos?editId=${invoiceId}`)
+                        const returnId = selectedCustomer?.id && selectedCustomer.id !== 'cash'
+                          ? selectedCustomer.id
+                          : ''
+                        navigate(`/pos?editId=${invoiceId}${returnId ? `&returnCustomerId=${returnId}` : ''}`)
                       }}
                       onPayInvoice={(invoiceId) => {
                         setPaymentModalInvoiceId(invoiceId)

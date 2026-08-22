@@ -183,8 +183,8 @@ export function openStatementPdfForPrint (customerId, fromDate, toDate, customer
     filename: safeStatementName(customerName, 'statement'),
     fetchPdf: () => customersAPI.getCustomerStatement(
       customerId,
-      new Date(fromDate).toISOString(),
-      new Date(toDate).toISOString()
+      fromDate,
+      toDate
     ),
     mode: 'print',
     debounceKey: `print:statement:${customerId}:${fromDate}:${toDate}`
@@ -215,8 +215,8 @@ export function downloadStatementPdf (customerId, fromDate, toDate, customerName
     filename: safeStatementName(customerName, 'statement'),
     fetchPdf: () => customersAPI.getCustomerStatement(
       customerId,
-      new Date(fromDate).toISOString(),
-      new Date(toDate).toISOString()
+      fromDate,
+      toDate
     ),
     mode: 'download',
     debounceKey: `download:statement:${customerId}:${fromDate}:${toDate}`

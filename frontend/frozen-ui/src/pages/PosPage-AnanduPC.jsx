@@ -864,12 +864,12 @@ const PosPage = () => {
             queueInvoicePdfPrefetch(saleId)
 
             // If we came from customer ledger, offer to go back
-            const cameFromLedger = document.referrer.includes('/ledger')
+            const cameFromLedger = document.referrer.includes('/ledger') || searchParams.get('returnCustomerId')
             if (cameFromLedger) {
-              // Small delay to show success message first
+              const returnCustomerId = searchParams.get('returnCustomerId')
               setTimeout(() => {
                 if (window.confirm('Invoice updated successfully! Would you like to return to Customer Ledger?')) {
-                  navigate('/ledger')
+                  navigate(returnCustomerId ? `/ledger?customerId=${returnCustomerId}` : '/ledger')
                 }
               }, 1000)
             }

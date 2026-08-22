@@ -56,6 +56,7 @@ const ExpensesPage = () => {
   const [showCategoryVatModal, setShowCategoryVatModal] = useState(false)
   const [updatingCategoryId, setUpdatingCategoryId] = useState(null)
   const [categoryVatEdits, setCategoryVatEdits] = useState({})
+  const [pageTab, setPageTab] = useState('list')
   
   const [categories, setCategories] = useState([]) // full list { id, name, colorCode, defaultVatRate, ... }
 
@@ -365,8 +366,32 @@ const ExpensesPage = () => {
         </div>
       </div>
 
-      <div className="p-2 sm:p-4">
+      <div className="border-b border-blue-200 bg-white mx-2 sm:mx-4 mt-2 rounded-t-lg sticky top-0 z-10">
+        <div className="flex overflow-x-auto scrollbar-hide">
+          {[
+            { id: 'list', label: 'List' },
+            { id: 'filters', label: 'Filters' },
+            { id: 'summary', label: 'Summary' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setPageTab(tab.id)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap ${
+                pageTab === tab.id
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-2 sm:p-4 flex-1 min-h-0">
         {/* Filters */}
+        {pageTab === 'filters' && (
         <div className="bg-white rounded-lg border-2 border-lime-300 shadow-sm p-3 sm:p-4 mb-4">
           <div className="flex items-center mb-3">
             <Filter className="h-4 w-4 text-blue-600 mr-2" />
@@ -476,22 +501,10 @@ const ExpensesPage = () => {
             </div>
           </div>
         </div>
-
-        {noVatCount > 0 && (
-          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-wrap items-center gap-2">
-            <span className="text-sm text-amber-800">
-              {noVatCount} expense(s) have no VAT data.
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowBulkVatModal(true)}
-              className="px-3 py-1.5 text-sm font-medium bg-amber-600 text-white rounded hover:bg-amber-700"
-            >
-              Review & Update
-            </button>
-          </div>
         )}
-        
+
+        {pageTab === 'summary' && (
+        <>
         {/* Summary Cards - Mobile Responsive */}
         {expenseSummary && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
@@ -561,6 +574,25 @@ const ExpensesPage = () => {
                 </RechartsPieChart>
               </ResponsiveContainer>
             </div>
+          </div>
+        )}
+        </>
+        )}
+
+        {pageTab === 'list' && (
+        <>
+        {noVatCount > 0 && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-wrap items-center gap-2">
+            <span className="text-sm text-amber-800">
+              {noVatCount} expense(s) have no VAT data.
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowBulkVatModal(true)}
+              className="px-3 py-1.5 text-sm font-medium bg-amber-600 text-white rounded hover:bg-amber-700"
+            >
+              Review & Update
+            </button>
           </div>
         )}
 
@@ -744,6 +776,8 @@ const ExpensesPage = () => {
             </div>
           )}
           </div>
+        )}
+        </>
         )}
       </div>
 

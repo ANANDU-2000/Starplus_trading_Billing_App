@@ -403,9 +403,8 @@ namespace FrozenApi.Controllers
         {
             try
             {
-                // Set default dates if not provided (last 30 days)
-                var from = fromDate ?? DateTime.UtcNow.AddDays(-30);
-                var to = toDate ?? DateTime.UtcNow;
+                var from = NormalizeDateOnly(fromDate, DateTime.UtcNow.AddDays(-30).Date);
+                var to = NormalizeDateOnly(toDate, DateTime.UtcNow.Date);
                 
                 var pdfBytes = await _customerService.GenerateCustomerStatementAsync(id, from, to);
                 var filename = $"customer_statement_{id}_{DateTime.UtcNow:yyyyMMdd}.pdf";
@@ -465,8 +464,8 @@ namespace FrozenApi.Controllers
                 var allOutstandingInvoices = await _customerService.GetOutstandingInvoicesAsync(id);
                 
                 // Apply date filter if provided
-                var from = fromDate ?? DateTime.Today.AddMonths(-12); // Default: last 12 months
-                var to = toDate ?? DateTime.Today;
+                var from = NormalizeDateOnly(fromDate, DateTime.Today.AddMonths(-12));
+                var to = NormalizeDateOnly(toDate, DateTime.Today);
                 
                 var filteredInvoices = allOutstandingInvoices
                     .Where(inv => inv.InvoiceDate >= from && inv.InvoiceDate <= to.AddDays(1)) // Include end date
@@ -513,6 +512,14 @@ namespace FrozenApi.Controllers
                     Errors = new List<string> { ex.Message }
                 });
             }
+        }
+
+        private static DateTime NormalizeDateOnly(DateTime? value, DateTime defaultValue)
+        {
+            if (!value.HasValue)
+                return defaultValue.Date;
+
+            return value.Value.Date;
         }
     }
 }

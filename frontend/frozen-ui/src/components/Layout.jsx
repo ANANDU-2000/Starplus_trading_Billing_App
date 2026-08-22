@@ -2,32 +2,19 @@ import { useState } from 'react'
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { 
-  Home, 
-  Package, 
-  ShoppingCart, 
-  CreditCard, 
-  Users, 
-  DollarSign, 
-  TrendingUp, 
-  Settings, 
+  LogOut,
   Menu,
   X,
-  LogOut,
-  Bell,
-  Search,
-  DollarSign as PriceTag,
-  Shield,
-  BarChart3,
-  Truck,
-  FileText,
-  BookOpen,
-  Receipt,
-  ClipboardList,
-  Activity
+  TrendingUp,
+  Settings,
+  Users,
+  FileText
 } from 'lucide-react'
 import BottomNav from './BottomNav'
 import Logo from './Logo'
 import AlertNotifications from './AlertNotifications'
+import DesktopSidebar from './DesktopSidebar'
+import { getMainNavigation, isNavActive } from '../config/navigation'
 
 const Layout = () => {
   const { user, logout } = useAuth()
@@ -35,23 +22,8 @@ const Layout = () => {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: Home },
-    { name: 'Products', href: '/products', icon: Package },
-    { name: 'Purchases', href: '/purchases', icon: Truck },
-    { name: 'POS', href: '/pos', icon: ShoppingCart },
-    { name: 'Customer Ledger', href: '/ledger', icon: BookOpen },
-    { name: 'Expenses', href: '/expenses', icon: Receipt },
-    { name: 'Sales Ledger', href: '/sales-ledger', icon: FileText },
-    { name: 'Reports', href: '/reports', icon: BarChart3 },
-    { name: 'Worksheet', href: '/worksheet', icon: ClipboardList },
-    ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Users', href: '/users', icon: Shield }] : []),
-    ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Activity Log', href: '/activity-log', icon: Activity }] : []),
-    ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Settings', href: '/settings', icon: Settings }] : []),
-    ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Backup & Restore', href: '/backup', icon: FileText }] : []),
-  ]
-
-  const isActive = (href) => location.pathname === href
+  const navigation = getMainNavigation(user)
+  const isActive = (href) => isNavActive(location.pathname, href)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -66,7 +38,9 @@ const Layout = () => {
             <Menu className="h-6 w-6" />
           </button>
           <Logo size="small" className="flex-1 justify-center" />
-          <div className="w-10"></div> {/* Spacer for centering */}
+          <div className="flex items-center gap-1">
+            {user?.role?.toLowerCase() === 'admin' && <AlertNotifications />}
+          </div>
         </div>
       </div>
 
@@ -115,40 +89,7 @@ const Layout = () => {
         </div>
       </div>
 
-      {/* Desktop sidebar - Blue Theme */}
-      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-20 lg:flex-col">
-        <div className="flex flex-col flex-grow bg-blue-800 text-white shadow-2xl">
-          <nav className="flex-1 px-2 py-4 space-y-2">
-            {navigation.map((item) => {
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={`flex flex-col items-center justify-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    isActive(item.href)
-                      ? 'bg-blue-600 text-white'
-                      : 'text-blue-100 hover:bg-blue-700'
-                  }`}
-                  title={item.name}
-                >
-                  <Icon className="h-5 w-5 mb-1" />
-                  <span className="text-xs text-center">{item.name}</span>
-                </Link>
-              )
-            })}
-          </nav>
-          <div className="border-t border-blue-700 p-2">
-            <button
-              onClick={logout}
-              className="flex flex-col items-center justify-center w-full px-3 py-2 text-sm text-blue-100 hover:text-white hover:bg-blue-700 rounded-lg transition-colors"
-            >
-              <LogOut className="h-5 w-5 mb-1" />
-              <span className="text-xs">Logout</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <DesktopSidebar user={user} pathname={location.pathname} onLogout={logout} />
 
       {/* Main content */}
       <div className="lg:pl-20">
