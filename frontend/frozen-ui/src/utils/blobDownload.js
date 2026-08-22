@@ -39,6 +39,10 @@ export function openPdfBlobInViewer (blob, { revokeDelayMs = 120_000 } = {}) {
   return 'same-tab'
 }
 
+/**
+ * iOS Safari (and some Android browsers) often ignore `download` on `<a>` for HTML blobs.
+ * Opens the blob in a new tab so the user can Share → Save / Print to PDF.
+ */
 export function tryOpenBlobInNewTab (blob, { revokeDelayMs = 120_000 } = {}) {
   if (!blob || blob.size === 0) return false
   const result = openPdfBlobInViewer(blob, { revokeDelayMs })

@@ -705,13 +705,29 @@ namespace FrozenApi.Controllers
         [HttpGet("audit-logs")]
         public async Task<ActionResult<ApiResponse<PagedResponse<AuditLogDto>>>> GetAuditLogs(
             [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? action = null,
+            [FromQuery] int? userId = null,
+            [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null,
+            [FromQuery] string? search = null)
         {
             try
             {
                 var query = _context.AuditLogs
                     .Include(a => a.User)
                     .AsQueryable();
+
+                if (!string.IsNullOrWhiteSpace(action))
+                    query = query.Where(a => a.Action == action);
+                if (userId.HasValue)
+                    query = query.Where(a => a.UserId == userId.Value);
+                if (fromDate.HasValue)
+                    query = query.Where(a => a.CreatedAt >= fromDate.Value);
+                if (toDate.HasValue)
+                    query = query.Where(a => a.CreatedAt <= toDate.Value);
+                if (!string.IsNullOrWhiteSpace(search))
+                    query = query.Where(a => a.Details != null && a.Details.Contains(search));
 
                 var totalCount = await query.CountAsync();
                 var logs = await query

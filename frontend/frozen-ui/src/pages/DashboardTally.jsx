@@ -147,15 +147,17 @@ const DashboardTally = () => {
       
       if (response?.success && response?.data) {
         const data = response.data
-        console.log('📊 Dashboard Data Received:', {
-          salesToday: data.salesToday,
-          expensesToday: data.expensesToday,
-          profitToday: data.profitToday,
-          pendingBills: data.pendingBills,
-          invoicesToday: data.invoicesToday,
-          invoicesWeekly: data.invoicesWeekly,
-          invoicesMonthly: data.invoicesMonthly
-        })
+        if (import.meta.env.DEV) {
+          console.log('Dashboard Data Received:', {
+            salesToday: data.salesToday,
+            expensesToday: data.expensesToday,
+            profitToday: data.profitToday,
+            pendingBills: data.pendingBills,
+            invoicesToday: data.invoicesToday,
+            invoicesWeekly: data.invoicesWeekly,
+            invoicesMonthly: data.invoicesMonthly
+          })
+        }
         
         setStats({
           salesToday: parseFloat(data.salesToday || data.SalesToday) || 0,

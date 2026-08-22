@@ -118,6 +118,11 @@ export const salesAPI = {
     return response.data
   },
 
+  getInvoiceVersions: async (id) => {
+    const response = await api.get(`/sales/${id}/versions`)
+    return response.data
+  },
+
   getInvoicePdf: async (id) => {
     try {
       const response = await api.get(`/sales/${id}/pdf`, {

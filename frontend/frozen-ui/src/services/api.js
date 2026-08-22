@@ -11,11 +11,8 @@ let lastNetworkErrorToast = null
 const ERROR_THROTTLE_MS = 3000 // Show max 1 error toast per 3 seconds for general errors
 const NETWORK_ERROR_THROTTLE_MS = 15000 // Show max 1 network error toast per 15 seconds
 
-// Request deduplication and throttling to prevent 429 errors
-const pendingRequests = new Map()
-const requestThrottle = new Map() // Track last request time per endpoint
-const REQUEST_THROTTLE_MS = 50 // Only throttle very rapid duplicates (< 50ms) - prevents double-clicks
-const MAX_CONCURRENT_REQUESTS = 20 // Increased concurrent requests limit
+// In-flight GET dedup: identical GET while pending returns the same promise
+const inFlightGetRequests = new Map()
 
 // Generate request key for deduplication
 const getRequestKey = (config) => {
@@ -87,41 +84,8 @@ api.interceptors.request.use(
       return Promise.reject(error)
     }
 
-    // CRITICAL: Throttle requests to prevent 429 errors
     const requestKey = getRequestKey(config)
-    const now = Date.now()
-    const lastRequestTime = requestThrottle.get(requestKey) || 0
-    const timeSinceLastRequest = now - lastRequestTime
-    
-    // CRITICAL: Remove aggressive throttling - only track, don't block
-    // Only log very rapid duplicates for debugging, but allow all requests to proceed
-    if (timeSinceLastRequest < REQUEST_THROTTLE_MS && !config._isRetry) {
-      // Log duplicate but don't block - allows normal page loads
-      if (pendingRequests.has(requestKey)) {
-        console.log(`⏸️ Rapid duplicate request detected (${timeSinceLastRequest}ms): ${config.method} ${config.url} - allowing to proceed`)
-      }
-    }
-    
-    // CRITICAL: Don't block requests - only track for monitoring
-    // Remove all blocking logic - let server handle rate limiting
-    // The server's 429 response will be handled gracefully
-    
-    // Track this request (for monitoring only, not blocking)
     config._requestKey = requestKey
-    config._requestTime = now
-    
-    // Update throttle time (for tracking only)
-    requestThrottle.set(requestKey, now)
-    
-    // Clean up old throttle entries periodically (prevent memory leaks)
-    if (requestThrottle.size > 200) {
-      const oneMinuteAgo = now - 60000
-      for (const [key, time] of requestThrottle.entries()) {
-        if (time < oneMinuteAgo) {
-          requestThrottle.delete(key)
-        }
-      }
-    }
 
     // Add auth token
     const token = localStorage.getItem('token')
@@ -133,10 +97,7 @@ api.interceptors.request.use(
     // Add retry configuration
     config._retryCount = config._retryCount || 0
     config._maxRetries = 3
-    config._requestKey = requestKey // Store for cleanup in response interceptor
-    
-    // CRITICAL: Request interceptor must return config, not promise
-    // Deduplication will be handled by tracking the request key
+
     return config
   },
   (error) => {
@@ -148,14 +109,7 @@ api.interceptors.request.use(
 // Offline detection and error handling
 api.interceptors.response.use(
   (response) => {
-    // Mark connection as successful on any successful response
     connectionManager.markConnected()
-    
-    // Clean up pending request tracking
-    if (response.config?._requestKey) {
-      pendingRequests.delete(response.config._requestKey)
-    }
-    
     return response
   },
   async (error) => {
@@ -200,12 +154,12 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    // Clean up pending request tracking on error (do this first)
+    // Clean up in-flight GET dedup entry on error
     if (error.config?._requestKey) {
-      pendingRequests.delete(error.config._requestKey)
+      inFlightGetRequests.delete(error.config._requestKey)
     }
-    
-    // Handle 429 Too Many Requests - CRITICAL: Prevent request flooding
+
+    // Handle 429 Too Many Requests
     if (error.response?.status === 429) {
       connectionManager.markConnected() // Server is responding
       
@@ -298,5 +252,33 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+const originalRequest = api.request.bind(api)
+api.request = (config) => {
+  const normalized = typeof config === 'string'
+    ? { url: config, method: 'get' }
+    : { ...config }
+  const method = (normalized.method || 'GET').toUpperCase()
+  const requestKey = getRequestKey(normalized)
+  normalized._requestKey = requestKey
+
+  const skipDedup = normalized._skipDedup || normalized._isRetry || method !== 'GET'
+
+  if (!skipDedup && inFlightGetRequests.has(requestKey)) {
+    return inFlightGetRequests.get(requestKey)
+  }
+
+  const promise = originalRequest(normalized).finally(() => {
+    if (!skipDedup) {
+      inFlightGetRequests.delete(requestKey)
+    }
+  })
+
+  if (!skipDedup) {
+    inFlightGetRequests.set(requestKey, promise)
+  }
+
+  return promise
+}
 
 export default api

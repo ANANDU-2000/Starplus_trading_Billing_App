@@ -64,9 +64,6 @@ namespace FrozenApi.Services
                     to = today.AddDays(1);
                 }
                 
-                Console.WriteLine($"📊 GetSummaryReportAsync called with fromDate: {from:yyyy-MM-dd}, toDate: {to:yyyy-MM-dd}");
-                Console.WriteLine($"📊 Date range: {from:yyyy-MM-dd HH:mm:ss} to {to:yyyy-MM-dd HH:mm:ss}");
-
                 decimal salesToday = 0;
                 decimal purchasesToday = 0;
                 decimal expensesToday = 0;
@@ -75,15 +72,11 @@ namespace FrozenApi.Services
                 {
                     var salesQuery = _context.Sales
                         .Where(s => !s.IsDeleted && s.InvoiceDate >= from && s.InvoiceDate < to);
-                    var salesCount = await salesQuery.CountAsync();
-                    Console.WriteLine($"📈 Found {salesCount} sales records in date range");
                     salesToday = await salesQuery.SumAsync(s => (decimal?)s.GrandTotal) ?? 0;
-                    Console.WriteLine($"💰 Total sales today: {salesToday}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ Error calculating salesToday: {ex.Message}");
-                    Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+                    Console.WriteLine($"Error calculating salesToday: {ex.Message}");
                     salesToday = 0;
                 }
 
@@ -91,15 +84,11 @@ namespace FrozenApi.Services
                 {
                     var purchasesQuery = _context.Purchases
                         .Where(p => p.PurchaseDate >= from && p.PurchaseDate < to);
-                    var purchasesCount = await purchasesQuery.CountAsync();
-                    Console.WriteLine($"📦 Found {purchasesCount} purchase records in date range");
                     purchasesToday = await purchasesQuery.SumAsync(p => (decimal?)p.TotalAmount) ?? 0;
-                    Console.WriteLine($"💰 Total purchases today: {purchasesToday}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ Error calculating purchasesToday: {ex.Message}");
-                    Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+                    Console.WriteLine($"Error calculating purchasesToday: {ex.Message}");
                     purchasesToday = 0;
                 }
 
@@ -107,15 +96,11 @@ namespace FrozenApi.Services
                 {
                     var expensesQuery = _context.Expenses
                         .Where(e => e.Date >= from && e.Date < to);
-                    var expensesCount = await expensesQuery.CountAsync();
-                    Console.WriteLine($"💸 Found {expensesCount} expense records in date range");
                     expensesToday = await expensesQuery.SumAsync(e => (decimal?)e.Amount) ?? 0;
-                    Console.WriteLine($"💰 Total expenses today: {expensesToday}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ Error calculating expensesToday: {ex.Message}");
-                    Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+                    Console.WriteLine($"Error calculating expensesToday: {ex.Message}");
                     expensesToday = 0;
                 }
 
@@ -123,15 +108,6 @@ namespace FrozenApi.Services
                 // Gross Profit = Sales - Purchases (what client wants)
                 var grossProfit = salesToday - purchasesToday;
                 var profitToday = grossProfit - expensesToday;
-                
-                Console.WriteLine($"\n========== REPORT SERVICE PROFIT CALCULATION (SIMPLIFIED CASH) ==========");
-                Console.WriteLine($"📊 Date Range: {from:yyyy-MM-dd HH:mm:ss} to {to:yyyy-MM-dd HH:mm:ss}");
-                Console.WriteLine($"💰 Sales (GrandTotal with VAT): {salesToday:C}");
-                Console.WriteLine($"📦 Purchases (with VAT): {purchasesToday:C}");
-                Console.WriteLine($"📊 Gross Profit (CASH: Sales - Purchases): {grossProfit:C}");
-                Console.WriteLine($"💸 Expenses: {expensesToday:C}");
-                Console.WriteLine($"✅ NET PROFIT (Cash): {profitToday:C}");
-                Console.WriteLine($"=========================================================================\n");
 
                 List<ProductDto> lowStockProducts = new List<ProductDto>();
                 try
@@ -176,39 +152,26 @@ namespace FrozenApi.Services
                 decimal paidBillsAmount = 0;
                 try
                 {
-                    // CRITICAL: Get ALL pending bills - sales with outstanding balance > 0
-                    // Use actual balance calculation: GrandTotal - PaidAmount
-                    var allSales = await _context.Sales
-                        .Where(s => !s.IsDeleted)
-                        .ToListAsync();
-                    
-                    // Calculate pending bills from ALL customers
-                    var pendingSales = allSales
-                        .Where(s => {
-                            var balance = s.GrandTotal - s.PaidAmount;
-                            return balance > 0.01m; // Allow 0.01 rounding tolerance
-                        })
-                        .ToList();
-                    
-                    pendingBillsCount = pendingSales.Count;
-                    pendingBillsAmount = pendingSales.Sum(s => s.GrandTotal - s.PaidAmount);
-                    
-                    // Calculate paid bills from ALL customers
-                    var paidSales = allSales
-                        .Where(s => {
-                            var balance = s.GrandTotal - s.PaidAmount;
-                            return balance <= 0.01m; // Fully paid (within rounding tolerance)
-                        })
-                        .ToList();
-                    
-                    paidBillsCount = paidSales.Count;
-                    paidBillsAmount = paidSales.Sum(s => s.GrandTotal);
-                    
-                    Console.WriteLine($"📊 Pending Bills: {pendingBillsCount} invoices, Amount: {pendingBillsAmount:C}");
-                    Console.WriteLine($"✅ Paid Bills: {paidBillsCount} invoices, Amount: {paidBillsAmount:C}");
-                    
+                    var salesBaseQuery = _context.Sales.Where(s => !s.IsDeleted);
+                    const decimal balanceTolerance = 0.01m;
+
+                    pendingBillsCount = await salesBaseQuery
+                        .Where(s => (s.GrandTotal - s.PaidAmount) > balanceTolerance)
+                        .CountAsync();
+
+                    pendingBillsAmount = await salesBaseQuery
+                        .Where(s => (s.GrandTotal - s.PaidAmount) > balanceTolerance)
+                        .SumAsync(s => (decimal?)(s.GrandTotal - s.PaidAmount)) ?? 0;
+
+                    paidBillsCount = await salesBaseQuery
+                        .Where(s => (s.GrandTotal - s.PaidAmount) <= balanceTolerance)
+                        .CountAsync();
+
+                    paidBillsAmount = await salesBaseQuery
+                        .Where(s => (s.GrandTotal - s.PaidAmount) <= balanceTolerance)
+                        .SumAsync(s => (decimal?)s.GrandTotal) ?? 0;
+
                     // Get pending invoices for display (with customer info)
-                    // CRITICAL: Get pending invoices with actual balance calculation
                     pendingInvoices = await (from s in _context.Sales
                                             join c in _context.Customers on s.CustomerId equals c.Id into customerGroup
                                             from c in customerGroup.DefaultIfEmpty()
@@ -291,9 +254,6 @@ namespace FrozenApi.Services
                     InvoicesMonthly = invoicesMonthly,
                     PaymentsReceivedToday = paymentsReceivedToday
                 };
-                
-                Console.WriteLine($"✅ SummaryReportDto created: Sales={salesToday}, Purchases={purchasesToday}, Expenses={expensesToday}, Profit={profitToday}");
-                Console.WriteLine($"✅ Bills Summary: Pending={pendingBillsCount} (${pendingBillsAmount:C}), Paid={paidBillsCount} (${paidBillsAmount:C})");
                 
                 return result;
             }
@@ -1188,17 +1148,39 @@ namespace FrozenApi.Services
         public async Task<CustomerReportDto> GetCustomerReportAsync(DateTime fromDate, DateTime toDate, decimal? minOutstanding = null)
         {
             var customers = await _context.Customers.ToListAsync();
+
+            var salesInPeriod = await _context.Sales
+                .Where(s => !s.IsDeleted && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate)
+                .ToListAsync();
+
+            var paymentsInPeriod = await _context.Payments
+                .Where(p => p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
+                .ToListAsync();
+
+            var salesByCustomer = salesInPeriod
+                .GroupBy(s => s.CustomerId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var paymentsByCustomer = paymentsInPeriod
+                .Where(p => p.CustomerId.HasValue)
+                .GroupBy(p => p.CustomerId!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var paymentsBySaleId = paymentsInPeriod
+                .Where(p => p.SaleId.HasValue)
+                .GroupBy(p => p.SaleId!.Value)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderBy(p => p.PaymentDate).ToList());
+
             var customerReports = new List<CustomerReportItemDto>();
 
             foreach (var customer in customers)
             {
-                var sales = await _context.Sales
-                    .Where(s => !s.IsDeleted && s.CustomerId == customer.Id && s.InvoiceDate >= fromDate && s.InvoiceDate < toDate)
-                    .ToListAsync();
-
-                var payments = await _context.Payments
-                    .Where(p => p.CustomerId == customer.Id && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
-                    .ToListAsync();
+                salesByCustomer.TryGetValue(customer.Id, out var sales);
+                sales ??= new List<Sale>();
+                paymentsByCustomer.TryGetValue(customer.Id, out var payments);
+                payments ??= new List<Payment>();
 
                 var totalSales = sales.Sum(s => s.GrandTotal);
                 var totalPayments = payments.Sum(p => p.Amount);
@@ -1212,9 +1194,9 @@ namespace FrozenApi.Services
                     var daysList = new List<int>();
                     foreach (var inv in paidInvoices)
                     {
-                        var firstPayment = payments.Where(p => p.SaleId == inv.Id).OrderBy(p => p.PaymentDate).FirstOrDefault();
-                        if (firstPayment != null)
+                        if (paymentsBySaleId.TryGetValue(inv.Id, out var salePayments) && salePayments.Count > 0)
                         {
+                            var firstPayment = salePayments[0];
                             daysList.Add((firstPayment.PaymentDate.Date - inv.InvoiceDate.Date).Days);
                         }
                     }

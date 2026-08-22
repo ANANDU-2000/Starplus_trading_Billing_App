@@ -6,8 +6,8 @@ import Dashboard from './pages/DashboardTally'
 import ProductsPage from './pages/ProductsPage'
 import PriceList from './pages/PriceList'
 import PurchasesPage from './pages/PurchasesPage'
-import PosPage from './pages/PosPage'
-import CustomerLedgerPage from './pages/CustomerLedgerPage'
+import PosPage from './pages/PosPage-AnanduPC'
+import CustomerLedgerPage from './pages/CustomerLedgerPage-AnanduPC'
 import ExpensesPage from './pages/ExpensesPage'
 import ReportsPage from './pages/ReportsPage'
 import SalesLedgerPage from './pages/SalesLedgerPage'
@@ -15,6 +15,7 @@ import WorksheetPage from './pages/WorksheetPage'
 import SettingsPage from './pages/SettingsPage'
 import UsersPage from './pages/UsersPage'
 import BackupPage from './pages/BackupPage'
+import ActivityLogPage from './pages/ActivityLogPage'
 import Layout from './components/Layout'
 import ConnectionStatus from './components/ConnectionStatus'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -64,6 +65,7 @@ function App() {
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/outstanding" element={<ReportsPage />} />
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/activity-log" element={<ActivityLogPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/backup" element={<BackupPage />} />
         </Route>

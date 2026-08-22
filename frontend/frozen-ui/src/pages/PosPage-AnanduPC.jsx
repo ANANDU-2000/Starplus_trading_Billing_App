@@ -31,9 +31,9 @@ import {
   getCachedInvoicePdf,
   loadCachedInvoicePdfUrl
 } from '../utils/invoicePdfActions'
+import { clearCachedInvoicePdf } from '../utils/pdfBlobCache'
 import { savePdfToDevice, printPdfBlob } from '../utils/blobDownload'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
-import { clearCachedInvoicePdf } from '../utils/pdfBlobCache'
 
 const PosPage = () => {
   const navigate = useNavigate()
@@ -79,6 +79,8 @@ const PosPage = () => {
   const productSearchRefs = useRef({})
   const productSearchTimers = useRef({})
   const uiStateRef = useRef({ isEditMode: false, loading: false, productSearchOpen: false, hasSearchTerms: false })
+  const catalogRefreshInFlight = useRef(false)
+  const lastCatalogRefreshAt = useRef(0)
   const [rowSearchResults, setRowSearchResults] = useState({})
 
   useEffect(() => {
@@ -93,11 +95,37 @@ const PosPage = () => {
       const response = await productsAPI.getProducts({ pageSize: 500 })
       if (response.success) {
         setProducts(response.data.items || [])
+      } else {
+        toast.error(response.message || 'Failed to load products')
       }
     } catch (error) {
       toast.error('Failed to load products')
     }
   }, [])
+
+  const loadCustomers = useCallback(async () => {
+    try {
+      const response = await customersAPI.getCustomers({ pageSize: 100 })
+      if (response.success) {
+        setCustomers(response.data.items)
+      } else {
+        toast.error(response.message || 'Failed to load customers')
+      }
+    } catch (error) {
+      toast.error('Failed to load customers')
+    }
+  }, [])
+
+  const refreshCatalog = useCallback(async () => {
+    if (catalogRefreshInFlight.current) return
+    catalogRefreshInFlight.current = true
+    try {
+      await Promise.all([loadProducts(), loadCustomers()])
+    } finally {
+      catalogRefreshInFlight.current = false
+      lastCatalogRefreshAt.current = Date.now()
+    }
+  }, [loadProducts, loadCustomers])
 
   const scheduleProductSearch = useCallback((rowIndex, rawTerm) => {
     const key = String(rowIndex)
@@ -123,17 +151,6 @@ const PosPage = () => {
         // silent — POS stays usable with local slice
       }
     }, 280)
-  }, [])
-
-  const loadCustomers = useCallback(async () => {
-    try {
-      const response = await customersAPI.getCustomers({ pageSize: 100 })
-      if (response.success) {
-        setCustomers(response.data.items)
-      }
-    } catch (error) {
-      toast.error('Failed to load customers')
-    }
   }, [])
 
   // Load next invoice number when customer is selected
@@ -250,15 +267,13 @@ const PosPage = () => {
   }, [customers, setSearchParams])
 
   useEffect(() => {
-    loadProducts()
-    loadCustomers()
+    refreshCatalog()
     
     // Auto-refresh products and customers every 60 seconds (reduced frequency)
     // Only refresh if page is visible and not in edit mode
     const refreshInterval = setInterval(() => {
       if (document.visibilityState === 'visible' && !isEditMode && !loading) {
-        loadProducts()
-        loadCustomers()
+        refreshCatalog()
       }
     }, 60000) // 60 seconds - reduced from 15
     
@@ -283,8 +298,8 @@ const PosPage = () => {
         !uiStateRef.current.productSearchOpen &&
         !uiStateRef.current.hasSearchTerms
       ) {
-        loadProducts()
-        loadCustomers()
+        if (Date.now() - lastCatalogRefreshAt.current < 2000) return
+        refreshCatalog()
       }
     }
 
@@ -299,7 +314,7 @@ const PosPage = () => {
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [loadProducts, loadCustomers])
+  }, [refreshCatalog, isEditMode, loading])
 
   // Check for editId in URL - load sale even if customers aren't loaded yet
   useEffect(() => {
@@ -807,13 +822,15 @@ const PosPage = () => {
           ...(saleData.invoiceDate && { invoiceDate: saleData.invoiceDate })
         }
         
-        // Log the update request for debugging
-        console.log('Updating invoice:', {
-          saleId: editingSaleId,
-          updateData,
-          hasRowVersion: !!editingSale?.rowVersion,
-          itemsCount: updateData.items?.length
-        })
+        // Log the update request for debugging (dev only)
+        if (import.meta.env.DEV) {
+          console.log('Updating invoice:', {
+            saleId: editingSaleId,
+            updateData,
+            hasRowVersion: !!editingSale?.rowVersion,
+            itemsCount: updateData.items?.length
+          })
+        }
         
         response = await salesAPI.updateSale(editingSaleId, updateData)
         if (response.success) {
@@ -866,18 +883,20 @@ const PosPage = () => {
         }
       } else {
         // Create new sale
-        console.log('📤 Sending Create Sale Request:')
-        console.log('  - Full saleData:', JSON.stringify(saleData, null, 2))
-        console.log('  - Items count:', saleData.items?.length)
-        console.log('  - Items detail:', saleData.items)
-        console.log('  - Customer ID:', saleData.customerId)
-        console.log('  - Grand Total:', totals.grandTotal)
-        console.log('  - Discount:', saleData.discount)
-        console.log('  - Payments:', saleData.payments)
-        
+        if (import.meta.env.DEV) {
+          console.log('Sending Create Sale Request:', {
+            saleData,
+            itemsCount: saleData.items?.length,
+            customerId: saleData.customerId,
+            grandTotal: totals.grandTotal
+          })
+        }
+
         response = await salesAPI.createSale(saleData)
-        
-        console.log('📦 Create Sale Response:', response)
+
+        if (import.meta.env.DEV) {
+          console.log('Create Sale Response:', response)
+        }
         
         if (response.success) {
           const invoiceNo = response.data?.invoiceNo
@@ -961,7 +980,9 @@ const PosPage = () => {
         if (error.response?.status === 400) {
           // Extract detailed error message from response
           const responseData = error.response.data
-          console.log('❌ 400 Bad Request - Full Response:', responseData)
+          if (import.meta.env.DEV) {
+            console.log('400 Bad Request - Full Response:', responseData)
+          }
           
           if (responseData?.message) {
             errorMsg = responseData.message
@@ -989,10 +1010,10 @@ const PosPage = () => {
         }
         
         toast.error(errorMsg, { duration: 8000 })
-        
-        // Log detailed error for debugging
-        console.log('📋 Error occurred during save')
-        console.log('❌ Backend Error Response:', error.response?.data)
+
+        if (import.meta.env.DEV) {
+          console.log('Error occurred during save:', error.response?.data)
+        }
       }
     } finally {
       setLoading(false)

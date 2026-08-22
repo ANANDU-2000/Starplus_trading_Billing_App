@@ -22,7 +22,8 @@ import {
   FileText,
   BookOpen,
   Receipt,
-  ClipboardList
+  ClipboardList,
+  Activity
 } from 'lucide-react'
 import BottomNav from './BottomNav'
 import Logo from './Logo'
@@ -45,6 +46,7 @@ const Layout = () => {
     { name: 'Reports', href: '/reports', icon: BarChart3 },
     { name: 'Worksheet', href: '/worksheet', icon: ClipboardList },
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Users', href: '/users', icon: Shield }] : []),
+    ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Activity Log', href: '/activity-log', icon: Activity }] : []),
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Settings', href: '/settings', icon: Settings }] : []),
     ...(user?.role?.toLowerCase() === 'admin' ? [{ name: 'Backup & Restore', href: '/backup', icon: FileText }] : []),
   ]

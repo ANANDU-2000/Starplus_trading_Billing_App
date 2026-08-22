@@ -1,0 +1,3172 @@
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useForm } from 'react-hook-form'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { 
+  Search, 
+  Download, 
+  Printer, 
+  RefreshCw, 
+  Settings,
+  Plus,
+  FileText,
+  Eye,
+  DollarSign,
+  TrendingUp,
+  Users,
+  CreditCard,
+  Calendar,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Send,
+  Filter,
+  X,
+  Edit,
+  Trash2,
+  Wallet,
+  Loader2
+} from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
+import { formatCurrency, formatBalance } from '../utils/currency'
+import { isNetworkErrorToSuppress } from '../utils/apiError'
+import { LoadingCard, LoadingButton } from '../components/Loading'
+import { Input, Select } from '../components/Form'
+import Modal from '../components/Modal'
+import { customersAPI, paymentsAPI, salesAPI, reportsAPI } from '../services'
+import { Lock, Unlock } from 'lucide-react'
+import toast from 'react-hot-toast'
+import PaymentModal from '../components/PaymentModal'
+import InvoicePreviewModal from '../components/InvoicePreviewModal'
+import ReceiptPreviewModal from '../components/ReceiptPreviewModal'
+import {
+  openInvoicePdfForViewing,
+  openInvoicePdfForPrint,
+  downloadInvoicePdf,
+  openStatementPdfForPrint,
+  downloadStatementPdf,
+  openPendingBillsPdfForPrint,
+  downloadPendingBillsPdf,
+  openReceiptPdfForPrint,
+  downloadReceiptPdf
+} from '../utils/invoicePdfActions'
+
+const CustomerLedgerPage = () => {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
+  const [customersLoading, setCustomersLoading] = useState(false)
+  const [paymentLoading, setPaymentLoading] = useState(false) // Separate loading state for payment submission
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [customerLoading, setCustomerLoading] = useState(false) // Separate loading state for customer creation
+  
+  // Use refs to track loading state synchronously (prevents race conditions)
+  const paymentLoadingRef = useRef(false)
+  const customerLoadingRef = useRef(false)
+  const recalculateInProgress = useRef(new Set()) // Track recalculate calls to prevent flooding
+  const validationToastShownRef = useRef({ balance: null, paymentIntegrity: null }) // { balance: { customerId, at }, paymentIntegrity: { customerId, at } }
+  const recalcJustRanRef = useRef(null) // { customerId, at } - skip balance block if same customer ran recalc recently
+  const loadRequestSeqRef = useRef(0) // Ignore stale async responses when multiple loads race
+  /** Always current selected customer id — use after await in loadCustomerData (avoids stale closure when switching customers). */
+  const selectedCustomerIdRef = useRef(null)
+  const VALIDATION_TOAST_THROTTLE_MS = 15000
+  const RECALC_COOLDOWN_MS = 8000
+  const [customers, setCustomers] = useState([])
+  const [filteredCustomers, setFilteredCustomers] = useState([])
+  const [selectedCustomer, setSelectedCustomer] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  
+  // Customer data
+  const [customerLedger, setCustomerLedger] = useState([])
+  const [customerInvoices, setCustomerInvoices] = useState([])
+  const [customerPayments, setCustomerPayments] = useState([])
+  const [outstandingInvoices, setOutstandingInvoices] = useState([])
+  const [customerSummary, setCustomerSummary] = useState(null)
+  
+  // UI State
+  const [activeTab, setActiveTab] = useState('ledger') // ledger, invoices, payments, reports
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentModalInvoiceId, setPaymentModalInvoiceId] = useState(null)
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false)
+  const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null)
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
+  const [showEditCustomerModal, setShowEditCustomerModal] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState(null)
+  const [dateRange, setDateRange] = useState({
+    from: new Date(new Date().setDate(1)).toISOString().split('T')[0], // First day of month
+    to: new Date().toISOString().split('T')[0] // Today
+  })
+  const [ledgerFilters, setLedgerFilters] = useState({
+    status: 'all',
+    type: 'all'
+  })
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState([])
+  
+  // Keyboard shortcuts refs
+  const searchInputRef = useRef(null)
+  const handleExportPDFRef = useRef(null)
+  const handleExportStatementRef = useRef(null)
+  
+  // Separate form instances for customer and payment forms
+  const customerForm = useForm()
+  const paymentForm = useForm()
+  
+  const {
+    register: customerRegister,
+    handleSubmit: handleCustomerSubmit,
+    reset: resetCustomerForm,
+    formState: { errors: customerErrors }
+  } = customerForm
+  
+  const {
+    register: paymentRegister,
+    handleSubmit: handlePaymentFormSubmit,
+    reset: resetPaymentForm,
+    setValue: setPaymentValue,
+    watch: watchPayment,
+    formState: { errors: paymentErrors }
+  } = paymentForm
+  
+  const selectedSaleId = watchPayment('saleId')
+  const selectedCustomerId = watchPayment('customerId')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // ========== ALL HANDLER FUNCTIONS - DEFINED FIRST ==========
+  // Excel Export Handler
+  const handleExportExcel = () => {
+    if (!selectedCustomer || customerLedger.length === 0) {
+      toast.error('No data to export')
+      return
+    }
+
+    try {
+      // Filter by date range
+      const filteredEntries = customerLedger.filter(entry => {
+        const entryDate = new Date(entry.date)
+        const fromDate = new Date(dateRange.from)
+        const toDate = new Date(dateRange.to)
+        toDate.setHours(23, 59, 59, 999)
+        return entryDate >= fromDate && entryDate <= toDate
+      })
+
+      // Create CSV content
+      const headers = ['Date', 'Type', 'Invoice No', 'Payment Mode', 'Debit (AED)', 'Credit (AED)', 'Status', 'Balance']
+      const rows = filteredEntries.map(entry => {
+        const dateStr = entry.type === 'Payment'
+          ? new Date(entry.date).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        
+        return [
+          dateStr,
+          entry.type || '',
+          entry.reference || '-',
+          entry.paymentMode || entry.PaymentMode || '-',
+          entry.debit > 0 ? entry.debit.toFixed(2) : '',
+          entry.credit > 0 ? entry.credit.toFixed(2) : '',
+          entry.status || '-',
+          entry.balance.toFixed(2)
+        ]
+      })
+
+      // Add closing balance row
+      const closingBalance = filteredEntries.length > 0 ? filteredEntries[filteredEntries.length - 1].balance : 0
+      rows.push(['', '', '', '', '', '', 'Closing Balance', closingBalance.toFixed(2)])
+
+      // Convert to CSV
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ].join('\n')
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      const url = URL.createObjectURL(blob)
+      link.setAttribute('href', url)
+      link.setAttribute('download', `Ledger_${selectedCustomer.name}_${new Date().toISOString().split('T')[0]}.csv`)
+      link.style.visibility = 'hidden'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+      toast.success('Ledger exported to CSV successfully')
+    } catch (error) {
+      console.error('Export error:', error)
+      toast.error('Failed to export ledger')
+    }
+  }
+
+  useEffect(() => {
+    selectedCustomerIdRef.current = selectedCustomer?.id ?? null
+  }, [selectedCustomer])
+
+  // Load all customers
+  useEffect(() => {
+    fetchCustomers()
+  }, [])
+
+  // Load customer from URL parameter
+  useEffect(() => {
+    const customerIdParam = searchParams.get('customerId')
+    if (customerIdParam) {
+      const customerId = parseInt(customerIdParam)
+      if (!isNaN(customerId)) {
+        const customer = customers.find(c => c.id === customerId)
+        if (customer) {
+          setSelectedCustomer(customer)
+        } else if (customers.length > 0) {
+          // Customer not found in list, try to fetch it
+          customersAPI.getCustomer(customerId).then(response => {
+            if (response?.success && response?.data) {
+              setSelectedCustomer(response.data)
+            }
+          }).catch(err => console.error('Failed to load customer from URL:', err))
+        }
+      }
+    }
+  }, [searchParams, customers])
+
+  // Load customer data when selected (debounced to prevent excessive calls).
+  // Intentionally does NOT depend on showReceiptModal/selectedPaymentIds so opening/closing receipt modal does not trigger reload.
+  useEffect(() => {
+    if (selectedCustomer) {
+      const timeoutId = setTimeout(() => {
+        loadCustomerData(selectedCustomer.id)
+      }, 100) // debounce: avoid duplicate calls when switching customer + date quickly
+      return () => clearTimeout(timeoutId)
+    }
+  }, [selectedCustomer?.id, dateRange.from, dateRange.to])
+
+  // Refresh data when window regains focus, but throttle to avoid repeated errors (e.g. schema/network)
+  const lastFocusRef = React.useRef(0)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (!selectedCustomer) return
+      const now = Date.now()
+      if (now - lastFocusRef.current < 15000) return // skip if we refetched in the last 15 seconds
+      lastFocusRef.current = now
+      // Soft refresh currently selected customer only.
+      loadCustomerData(selectedCustomer.id)
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible' || !selectedCustomer) return
+      const now = Date.now()
+      if (now - lastFocusRef.current < 15000) return
+      lastFocusRef.current = now
+      loadCustomerData(selectedCustomer.id)
+    }
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [selectedCustomer])
+
+  // Filter customers
+  useEffect(() => {
+    filterCustomers()
+  }, [customers, searchTerm])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // F2 - Focus search
+      if (e.key === 'F2' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+      // F4 - Add Payment
+      if (e.key === 'F4' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault()
+        if (selectedCustomer) {
+          setShowPaymentModal(true)
+        }
+      }
+      // F5 - View Statement
+      if (e.key === 'F5' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault()
+        if (selectedCustomer) {
+          void handleExportStatementRef.current?.().catch((err) =>
+            console.error('Statement PDF:', err)
+          )
+        }
+      }
+      // F7 - Export PDF
+      if (e.key === 'F7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault()
+        if (selectedCustomer) {
+          void handleExportPDFRef.current?.().catch((err) => console.error('Ledger PDF:', err))
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyPress)
+    return () => window.removeEventListener('keydown', handleKeyPress)
+  }, [selectedCustomer])
+
+  const fetchCustomers = async () => {
+    try {
+      setCustomersLoading(true)
+      const response = await customersAPI.getCustomers({ page: 1, pageSize: 1000 })
+      if (response.success && response.data) {
+        setCustomers(response.data.items || [])
+      }
+    } catch (error) {
+      console.error('Failed to load customers:', error)
+      toast.error('Failed to load customers')
+    } finally {
+      setCustomersLoading(false)
+    }
+  }
+
+  const filterCustomers = () => {
+    let filtered = customers
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      filtered = filtered.filter(c => 
+        c.name?.toLowerCase().includes(term) ||
+        c.phone?.includes(term) ||
+        c.trn?.toLowerCase().includes(term) ||
+        c.address?.toLowerCase().includes(term)
+      )
+    }
+    setFilteredCustomers(filtered)
+  }
+
+  // ============================================================================
+  // DATA VALIDATION & RECONCILIATION FUNCTIONS - GUARANTEE REAL DATA INTEGRITY
+  // ============================================================================
+  
+  /**
+   * Validate and reconcile customer data to ensure 100% accuracy
+   * Returns validation report with any discrepancies found
+   */
+  const validateAndReconcileCustomerData = async (customerId, ledgerData, invoicesData, paymentsData, customerData) => {
+    const validationReport = {
+      isValid: true,
+      errors: [],
+      warnings: [],
+      discrepancies: []
+    }
+    
+    try {
+      // 1. VALIDATE CUSTOMER ID CONSISTENCY
+      if (!customerId || customerId <= 0) {
+        validationReport.isValid = false
+        validationReport.errors.push('Invalid customer ID')
+        return validationReport
+      }
+      
+      // 2. VALIDATE ALL INVOICES BELONG TO CUSTOMER
+      const invalidInvoices = invoicesData.filter(inv => {
+        const invCustomerId = inv.customerId || inv.customerID
+        return invCustomerId !== customerId && 
+               parseInt(invCustomerId) !== parseInt(customerId)
+      })
+      if (invalidInvoices.length > 0) {
+        validationReport.isValid = false
+        validationReport.errors.push(`${invalidInvoices.length} invoice(s) do not belong to customer ${customerId}`)
+        validationReport.discrepancies.push({
+          type: 'INVOICE_MISMATCH',
+          count: invalidInvoices.length,
+          details: invalidInvoices.map(inv => ({ id: inv.id, invoiceNo: inv.invoiceNo, customerId: inv.customerId }))
+        })
+      }
+      
+      // 3. VALIDATE ALL PAYMENTS BELONG TO CUSTOMER
+      const invalidPayments = paymentsData.filter(p => {
+        const paymentCustomerId = p.customerId || p.customerID
+        return paymentCustomerId !== customerId && 
+               parseInt(paymentCustomerId) !== parseInt(customerId)
+      })
+      if (invalidPayments.length > 0) {
+        validationReport.isValid = false
+        validationReport.errors.push(`${invalidPayments.length} payment(s) do not belong to customer ${customerId}`)
+        validationReport.discrepancies.push({
+          type: 'PAYMENT_MISMATCH',
+          count: invalidPayments.length,
+          details: invalidPayments.map(p => ({ id: p.id, amount: p.amount, customerId: p.customerId }))
+        })
+      }
+      
+      // 4. RECONCILE BALANCE - Calculate from actual transactions
+      if (customerData) {
+        const calculatedTotalSales = invoicesData.reduce((sum, inv) => sum + (parseFloat(inv.grandTotal) || 0), 0)
+        const calculatedTotalPayments = paymentsData.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+        const calculatedBalance = calculatedTotalSales - calculatedTotalPayments
+        const storedBalance = parseFloat(customerData.balance) || 0
+        
+        // Allow small rounding differences (0.01)
+        const balanceDifference = Math.abs(calculatedBalance - storedBalance)
+        if (balanceDifference > 0.01) {
+          validationReport.warnings.push(`Balance discrepancy detected: Calculated=${calculatedBalance.toFixed(2)}, Stored=${storedBalance.toFixed(2)}, Difference=${balanceDifference.toFixed(2)}`)
+          validationReport.discrepancies.push({
+            type: 'BALANCE_MISMATCH',
+            calculated: calculatedBalance,
+            stored: storedBalance,
+            difference: balanceDifference
+          })
+        }
+      }
+      
+      // 5. VALIDATE PAYMENT-INVOICE LINKAGE
+      const paymentInvoiceMismatches = []
+      paymentsData.forEach(payment => {
+        if (payment.saleId || payment.invoiceId) {
+          const linkedInvoiceId = payment.saleId || payment.invoiceId
+          const linkedInvoice = invoicesData.find(inv => inv.id === linkedInvoiceId)
+          if (linkedInvoice) {
+            // Verify payment customer matches invoice customer
+            const paymentCustomerId = payment.customerId || payment.customerID
+            const invoiceCustomerId = linkedInvoice.customerId || linkedInvoice.customerID
+            if (paymentCustomerId !== invoiceCustomerId && 
+                parseInt(paymentCustomerId) !== parseInt(invoiceCustomerId)) {
+              paymentInvoiceMismatches.push({
+                paymentId: payment.id,
+                invoiceId: linkedInvoiceId,
+                paymentCustomerId,
+                invoiceCustomerId
+              })
+            }
+          }
+        }
+      })
+      if (paymentInvoiceMismatches.length > 0) {
+        validationReport.warnings.push(`${paymentInvoiceMismatches.length} payment-invoice linkage mismatch(es)`)
+        validationReport.discrepancies.push({
+          type: 'PAYMENT_INVOICE_LINKAGE_MISMATCH',
+          count: paymentInvoiceMismatches.length,
+          details: paymentInvoiceMismatches
+        })
+      }
+      
+      // 6. VALIDATE LEDGER ENTRIES CONSISTENCY
+      if (ledgerData && ledgerData.length > 0) {
+        const ledgerTotalDebit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.debit) || 0), 0)
+        const ledgerTotalCredit = ledgerData.reduce((sum, entry) => sum + (parseFloat(entry.credit) || 0), 0)
+        const invoiceTotal = invoicesData.reduce((sum, inv) => sum + (parseFloat(inv.grandTotal) || 0), 0)
+        const paymentTotal = paymentsData.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+        
+        // Ledger debit should match invoice total (within rounding)
+        const debitDifference = Math.abs(ledgerTotalDebit - invoiceTotal)
+        if (debitDifference > 0.01) {
+          validationReport.warnings.push(`Ledger debit mismatch: Ledger=${ledgerTotalDebit.toFixed(2)}, Invoices=${invoiceTotal.toFixed(2)}`)
+        }
+        
+        // Ledger credit should match payment total (within rounding)
+        const creditDifference = Math.abs(ledgerTotalCredit - paymentTotal)
+        if (creditDifference > 0.01) {
+          validationReport.warnings.push(`Ledger credit mismatch: Ledger=${ledgerTotalCredit.toFixed(2)}, Payments=${paymentTotal.toFixed(2)}`)
+        }
+      }
+      
+      console.log('✅ Data validation completed:', validationReport)
+      return validationReport
+    } catch (error) {
+      console.error('❌ Error during data validation:', error)
+      validationReport.isValid = false
+      validationReport.errors.push(`Validation error: ${error.message}`)
+      return validationReport
+    }
+  }
+  
+  /**
+   * Recalculate and verify customer balance from real data
+   * CRITICAL: Prevents duplicate calls for same customer
+   */
+  const recalculateCustomerBalance = async (customerId) => {
+    // Prevent duplicate calls for same customer
+    if (recalculateInProgress.current.has(customerId)) {
+      console.log(`⏸️ Balance recalculation already in progress for customer ${customerId}`)
+      return { success: false, message: 'Recalculation already in progress' }
+    }
+    
+    recalculateInProgress.current.add(customerId)
+    
+    try {
+      const response = await customersAPI.recalculateBalance(customerId)
+      if (response.success) {
+        console.log(`✅ Balance recalculated for customer ${customerId}`)
+        return { success: true, message: 'Balance recalculated successfully' }
+      } else {
+        // Don't log errors repeatedly
+        if (!response._logged) {
+          console.error('❌ Balance recalculation failed:', response.message)
+          response._logged = true
+        }
+        return { success: false, message: response.message || 'Failed to recalculate balance' }
+      }
+    } catch (error) {
+      // Don't log 429 errors repeatedly
+      if (error?.response?.status !== 429 && !error?._logged) {
+        console.error('❌ Error recalculating balance:', error)
+        error._logged = true
+      }
+      return { success: false, message: error.message || 'Error recalculating balance' }
+    } finally {
+      // Remove from in-progress set after delay to prevent rapid re-calls
+      setTimeout(() => {
+        recalculateInProgress.current.delete(customerId)
+      }, 1000)
+    }
+  }
+  
+  /**
+   * Verify payment data integrity
+   */
+  const verifyPaymentIntegrity = (payments, invoices) => {
+    const issues = []
+    
+    payments.forEach(payment => {
+      // Check payment amount is positive
+      if (parseFloat(payment.amount) <= 0) {
+        issues.push({ type: 'INVALID_AMOUNT', paymentId: payment.id, amount: payment.amount })
+      }
+      
+      // Check payment date is valid
+      if (!payment.paymentDate || isNaN(new Date(payment.paymentDate).getTime())) {
+        issues.push({ type: 'INVALID_DATE', paymentId: payment.id })
+      }
+      
+      // If payment is linked to invoice, verify invoice exists and amount doesn't exceed invoice total
+      if (payment.saleId || payment.invoiceId) {
+        const linkedInvoiceId = payment.saleId || payment.invoiceId
+        const linkedInvoice = invoices.find(inv => inv.id === linkedInvoiceId)
+        if (!linkedInvoice) {
+          issues.push({ type: 'MISSING_INVOICE', paymentId: payment.id, invoiceId: linkedInvoiceId })
+        } else {
+          const invoiceOutstanding = parseFloat(linkedInvoice.grandTotal) - (parseFloat(linkedInvoice.paidAmount) || 0)
+          if (parseFloat(payment.amount) > invoiceOutstanding + 0.01) { // Allow small rounding
+            issues.push({ 
+              type: 'PAYMENT_EXCEEDS_OUTSTANDING', 
+              paymentId: payment.id, 
+              paymentAmount: payment.amount,
+              invoiceOutstanding: invoiceOutstanding
+            })
+          }
+        }
+      }
+    })
+    
+    return {
+      isValid: issues.length === 0,
+      issues
+    }
+  }
+
+  const loadCustomerData = async (customerId, { strictValidation = false } = {}) => {
+    const loadSeq = ++loadRequestSeqRef.current
+    // Handle cash customer (customerId is null or special flag)
+    const isCashCustomer = !customerId || customerId === 'cash' || customerId === 0
+    
+    if (isCashCustomer) {
+      // Load cash customer ledger
+      try {
+        setLoading(true)
+        
+        const ledgerRes = await customersAPI.getCashCustomerLedger()
+        if (loadSeq !== loadRequestSeqRef.current) return
+        
+        if (ledgerRes.success && ledgerRes.data) {
+          const ledgerData = Array.isArray(ledgerRes.data) ? ledgerRes.data : []
+          setCustomerLedger(ledgerData)
+        }
+        
+        // Load cash customer sales
+        const salesRes = await salesAPI.getSales({ page: 1, pageSize: 1000 })
+        if (loadSeq !== loadRequestSeqRef.current) return
+        if (salesRes.success && salesRes.data) {
+          const allSales = salesRes.data.items || []
+          const cashSales = allSales.filter(sale => !sale.customerId)
+          setCustomerInvoices(cashSales)
+        }
+        
+        setCustomerSummary({
+          totalDebit: ledgerRes.data?.reduce((sum, e) => sum + (e.debit || 0), 0) || 0,
+          totalCredit: ledgerRes.data?.reduce((sum, e) => sum + (e.credit || 0), 0) || 0,
+          balance: 0 // Cash customers always have 0 balance
+        })
+      } catch (error) {
+        console.error('Failed to load cash customer data:', error)
+        toast.error('Failed to load cash customer ledger')
+      } finally {
+        if (loadSeq === loadRequestSeqRef.current) {
+          setLoading(false)
+        }
+      }
+      return
+    }
+    
+    // CRITICAL: Validate customerId matches selected customer to prevent data mismatches
+    if (!customerId || customerId <= 0) {
+      console.error('Invalid customer ID:', customerId)
+      return
+    }
+    
+    if (selectedCustomerIdRef.current !== customerId) {
+      return
+    }
+
+    try {
+      setLoading(true)
+      
+      // Load all data in parallel
+      // CRITICAL: Use Reports API which properly filters by customerId on backend
+      // This ensures ALL customer invoices are retrieved, not just first 1000 from entire database
+      const [ledgerRes, invoicesRes, outstandingRes, customerRes] = await Promise.all([
+        customersAPI.getCustomerLedger(customerId),
+        reportsAPI.getSalesReport({ 
+          page: 1, 
+          pageSize: 1000, 
+          customerId,
+          fromDate: dateRange.from,
+          toDate: dateRange.to
+        }),
+        customersAPI.getOutstandingInvoices(customerId),
+        customersAPI.getCustomer(customerId)
+      ])
+
+      if (loadSeq !== loadRequestSeqRef.current) {
+        return
+      }
+      if (selectedCustomerIdRef.current !== customerId) {
+        return
+      }
+
+      let ledgerData = []
+      let invoicesData = []
+      let outstandingData = []
+
+      if (ledgerRes.success && ledgerRes.data) {
+        ledgerData = Array.isArray(ledgerRes.data) ? ledgerRes.data : []
+        // Validate all ledger entries belong to this customer (extra safety check)
+        const validLedgerData = ledgerData.filter(entry => {
+          // Ledger entries should all be for this customer (backend should filter, but double-check)
+          return true // Backend already filters, but we can add more validation if needed
+        })
+        setCustomerLedger(validLedgerData)
+      }
+
+      if (invoicesRes.success && invoicesRes.data) {
+        const sales = invoicesRes.data.items || []
+        // CRITICAL: Validate all invoices belong to this customer
+        const validSales = sales.filter(sale => {
+          // Ensure sale belongs to this customer
+          return sale.customerId === customerId || sale.customerId === parseInt(customerId)
+        })
+        // Backend already filters by date range, so use validSales directly
+        invoicesData = validSales
+        setCustomerInvoices(invoicesData)
+      }
+
+      if (outstandingRes.success && outstandingRes.data) {
+        outstandingData = Array.isArray(outstandingRes.data) ? outstandingRes.data : []
+        // Validate outstanding invoices belong to this customer
+        const validOutstanding = outstandingData.filter(inv => {
+          return inv.customerId === customerId || inv.customerId === parseInt(customerId)
+        })
+        setOutstandingInvoices(validOutstanding)
+      }
+
+      if (customerRes.success && customerRes.data) {
+        const customer = customerRes.data
+        // Calculate summary using FRESH data filtered by date range (matching what's shown in tabs)
+        // Filter ledger data by date range for accurate calculations
+        const filteredLedgerData = ledgerData.filter(entry => {
+          const entryDate = new Date(entry.date)
+          const fromDate = new Date(dateRange.from)
+          const toDate = new Date(dateRange.to)
+          toDate.setHours(23, 59, 59, 999)
+          return entryDate >= fromDate && entryDate <= toDate
+        })
+        
+        // Calculate totals from filtered ledger data (matching LedgerStatementTab logic)
+        const totalSales = filteredLedgerData.reduce((sum, entry) => sum + (entry.debit || 0), 0)
+        const totalPayments = filteredLedgerData
+          .filter(entry => entry.type === 'Payment')
+          .reduce((sum, entry) => sum + (entry.credit || 0), 0)
+        // Outstanding is the difference between sales and payments in the date range
+        const outstanding = totalSales - totalPayments
+        // Also store the customer's overall balance for reference
+        const customerBalance = customer.balance || 0
+
+        setCustomerSummary({
+          totalSales,
+          totalPayments,
+          outstanding,
+          customerBalance, // Store overall balance separately
+          customer
+        })
+      }
+
+      // Load payments separately
+      const paymentsRes = await paymentsAPI.getPayments({ page: 1, pageSize: 1000, customerId })
+      if (loadSeq !== loadRequestSeqRef.current) {
+        return
+      }
+      if (selectedCustomerIdRef.current !== customerId) {
+        return
+      }
+
+      if (paymentsRes.success && paymentsRes.data) {
+        const allPayments = paymentsRes.data.items || []
+        // CRITICAL: Strictly filter payments by customerId to prevent mismatches
+        const customerPayments = allPayments
+          .filter(p => {
+            // Ensure payment belongs to this customer (check both string and number)
+            const paymentCustomerId = p.customerId || p.customerID
+            return paymentCustomerId === customerId || 
+                   paymentCustomerId === parseInt(customerId) || 
+                   parseInt(paymentCustomerId) === parseInt(customerId)
+          })
+          .filter(p => {
+            const paymentDate = new Date(p.paymentDate)
+            const fromDate = new Date(dateRange.from)
+            const toDate = new Date(dateRange.to)
+            toDate.setHours(23, 59, 59, 999)
+            return paymentDate >= fromDate && paymentDate <= toDate
+          })
+        setCustomerPayments(customerPayments)
+        
+        if (strictValidation) {
+          // CRITICAL: VALIDATE AND RECONCILE ALL DATA FOR GUARANTEED ACCURACY
+          const validationReport = await validateAndReconcileCustomerData(
+            customerId,
+            ledgerData,
+            invoicesData,
+            customerPayments,
+            customerRes.success ? customerRes.data : null
+          )
+
+          if (selectedCustomerIdRef.current !== customerId) {
+            return
+          }
+
+          // If validation found critical errors, show warning and attempt to fix
+          if (!validationReport.isValid && validationReport.errors.length > 0) {
+            console.error('❌ CRITICAL DATA VALIDATION ERRORS:', validationReport.errors)
+            toast.error(`Data integrity issues detected. ${validationReport.errors.length} error(s) found.`, {
+              duration: 5000
+            })
+            
+            // Attempt to recalculate balance to fix discrepancies
+            const recalcResult = await recalculateCustomerBalance(customerId)
+            if (recalcResult.success) {
+              toast.success('Balance recalculated to fix discrepancies')
+            }
+          } else if (validationReport.warnings.length > 0) {
+            console.warn('⚠️ Data validation warnings:', validationReport.warnings)
+            const balanceMismatch = validationReport.discrepancies.some(d => d.type === 'BALANCE_MISMATCH')
+            const recalcRecent = recalcJustRanRef.current?.customerId === customerId &&
+              (Date.now() - (recalcJustRanRef.current?.at ?? 0)) < RECALC_COOLDOWN_MS
+            if (balanceMismatch && !recalcRecent) {
+              const balanceToastShown = validationToastShownRef.current.balance?.customerId === customerId &&
+                (Date.now() - (validationToastShownRef.current.balance?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
+              if (!balanceToastShown) {
+                toast('Balance discrepancy detected. Recalculating...', { icon: '⚠️' })
+                validationToastShownRef.current = { ...validationToastShownRef.current, balance: { customerId, at: Date.now() } }
+              }
+              const recalcResult = await recalculateCustomerBalance(customerId)
+              recalcJustRanRef.current = { customerId, at: Date.now() }
+              if (recalcResult.success) {
+                console.debug(`Balance recalculation succeeded for customer ${customerId}`)
+              }
+            }
+          }
+          
+          // Verify payment integrity - show toast at most once per customer per throttle window
+          const paymentIntegrity = verifyPaymentIntegrity(customerPayments, invoicesData)
+          if (!paymentIntegrity.isValid) {
+            console.error('❌ Payment integrity issues:', paymentIntegrity.issues)
+            const piToastShown = validationToastShownRef.current.paymentIntegrity?.customerId === customerId &&
+              (Date.now() - (validationToastShownRef.current.paymentIntegrity?.at ?? 0)) < VALIDATION_TOAST_THROTTLE_MS
+            if (!piToastShown) {
+              toast.error(`${paymentIntegrity.issues.length} payment integrity issue(s) detected`, {
+                duration: 5000
+              })
+              validationToastShownRef.current = { ...validationToastShownRef.current, paymentIntegrity: { customerId, at: Date.now() } }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // CRITICAL: Prevent error flooding - only show error once
+      if (!error._logged) {
+        console.error('Failed to load customer data:', error)
+        error._logged = true
+        
+        // Only show error if it's not a 429 (rate limit) or throttled request
+        if (error?.response?.status !== 429 && !error?.isThrottled && !error?.isRateLimited) {
+          toast.error(error?.response?.data?.message || 'Failed to load customer data')
+        }
+      }
+      
+      // CRITICAL: Don't auto-retry on 429 errors - this causes infinite loops
+      if (error?.response?.status === 429 || error?.isThrottled || error?.isRateLimited) {
+        // Rate limited - don't retry automatically
+        return
+      }
+      
+      // Only attempt recovery for non-rate-limit errors, and only once
+      if (!error._recoveryAttempted) {
+        error._recoveryAttempted = true
+        try {
+          await recalculateCustomerBalance(customerId)
+        } catch (recoveryError) {
+          // Don't log recovery errors to prevent flooding
+          if (!recoveryError._logged) {
+            console.error('Recovery failed:', recoveryError)
+            recoveryError._logged = true
+          }
+        }
+      }
+    } finally {
+      if (loadSeq === loadRequestSeqRef.current) {
+        setLoading(false)
+      }
+    }
+  }
+
+  const handleSelectCustomer = (customer) => {
+    setCustomerLedger([])
+    setCustomerInvoices([])
+    setCustomerPayments([])
+    setOutstandingInvoices([])
+    setCustomerSummary(null)
+    setLedgerFilters({ status: 'all', type: 'all' })
+    setSelectedPaymentIds([])
+    setSelectedCustomer(customer)
+    setSearchTerm('')
+    validationToastShownRef.current = { balance: null, paymentIntegrity: null }
+    recalcJustRanRef.current = null
+  }
+
+  const handleAddCustomer = async (data) => {
+    // Debug logs removed to prevent console flooding
+    
+    // Prevent multiple submissions using ref (synchronous check)
+    if (customerLoadingRef.current || customerLoading) {
+      console.log('⚠️ Customer creation already in progress, ignoring duplicate submission')
+      toast.error('Please wait, customer creation in progress...')
+      return
+    }
+    
+    if (!data || !data.name) {
+      console.error('❌ Customer data validation failed:', data)
+      toast.error('Customer name is required')
+      return
+    }
+    
+    // Set loading state IMMEDIATELY (both ref and state)
+    customerLoadingRef.current = true
+    setCustomerLoading(true)
+    
+    try {
+      // Ensure creditLimit is a number
+      const customerData = {
+        name: data.name?.trim() || '',
+        phone: data.phone?.trim() || null,
+        email: data.email?.trim() || null,
+        trn: data.trn?.trim() || null,
+        address: data.address?.trim() || null,
+        creditLimit: data.creditLimit ? parseFloat(data.creditLimit) : 0
+      }
+      
+      // Validate required field
+      if (!customerData.name) {
+        toast.error('Customer name is required')
+        customerLoadingRef.current = false
+        setCustomerLoading(false) // Reset loading state on validation error
+        return
+      }
+      
+      console.log('Creating customer with data:', customerData)
+      const response = await customersAPI.createCustomer(customerData)
+      // Response logged only if needed for debugging
+      
+      if (response?.success) {
+        toast.success('✅ Customer added successfully!')
+        setShowAddCustomerModal(false)
+        resetCustomerForm()
+        
+        // INSTANT UPDATE: No delay - refresh immediately
+        // Refreshing customer list and data
+        await Promise.all([
+          fetchCustomers(), // Refresh customer list
+          response?.data ? loadCustomerData(response.data.id) : Promise.resolve()
+        ])
+        
+        if (response?.data) {
+          // New customer created successfully
+          setSelectedCustomer(response.data) // Auto-select new customer
+          
+          // Force UI refresh for all related components
+          setSearchTerm('') // Clear search to show new customer
+        }
+        
+        // Trigger global refresh events for other pages/components
+        window.dispatchEvent(new CustomEvent('customerCreated', { detail: response.data }))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'customers' } }))
+        
+        // Update URL if customer was created
+        if (response?.data?.id) {
+          setSearchParams({ customerId: response.data.id })
+        }
+      } else {
+        console.error('❌ Customer creation failed:', response)
+        toast.error(response?.message || 'Failed to create customer')
+      }
+    } catch (error) {
+      console.error('Failed to create customer - Full error:', error)
+      console.error('Error response:', error?.response)
+      const errorMessage = error?.response?.data?.message || 
+                          (Array.isArray(error?.response?.data?.errors) ? error.response.data.errors.join(', ') : '') ||
+                          error?.message || 
+                          'Failed to create customer'
+      toast.error(errorMessage)
+    } finally {
+      // Reset loading state (both ref and state)
+      customerLoadingRef.current = false
+      setCustomerLoading(false)
+    }
+  }
+
+  const handleEditCustomer = async (data) => {
+    if (!editingCustomer || !editingCustomer.id) {
+      toast.error('No customer selected for editing')
+      return
+    }
+    
+    customerLoadingRef.current = true
+    setCustomerLoading(true)
+    
+    try {
+      const customerData = {
+        name: data.name?.trim() || '',
+        phone: data.phone?.trim() || null,
+        email: data.email?.trim() || null,
+        trn: data.trn?.trim() || null,
+        address: data.address?.trim() || null,
+        creditLimit: data.creditLimit ? parseFloat(data.creditLimit) : 0
+      }
+      
+      if (!customerData.name) {
+        toast.error('Customer name is required')
+        customerLoadingRef.current = false
+        setCustomerLoading(false)
+        return
+      }
+      
+      const response = await customersAPI.updateCustomer(editingCustomer.id, customerData)
+      
+      if (response?.success) {
+        toast.success('✅ Customer updated successfully!')
+        setShowEditCustomerModal(false)
+        setEditingCustomer(null)
+        resetCustomerForm()
+        
+        // Refresh data
+        await Promise.all([
+          fetchCustomers(),
+          loadCustomerData(editingCustomer.id)
+        ])
+        
+        // Update selected customer with new data
+        if (response?.data) {
+          setSelectedCustomer(response.data)
+        }
+        
+        window.dispatchEvent(new CustomEvent('customerUpdated', { detail: response.data }))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'customers' } }))
+      } else {
+        toast.error(response?.message || 'Failed to update customer')
+      }
+    } catch (error) {
+      console.error('Failed to update customer:', error)
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to update customer'
+      toast.error(errorMessage)
+    } finally {
+      customerLoadingRef.current = false
+      setCustomerLoading(false)
+    }
+  }
+
+  /**
+   * Manual reconciliation function - user can trigger to verify and fix data
+   */
+  const handleManualReconciliation = async () => {
+    if (!selectedCustomer) {
+      toast.error('Please select a customer first')
+      return
+    }
+    
+    const customerId = selectedCustomer.id
+    toast.loading('Validating and reconciling data...', { id: 'reconciliation' })
+    
+    try {
+      // First recalculate balance from backend
+      const recalcResult = await recalculateCustomerBalance(customerId)
+      
+      if (recalcResult.success) {
+        // Reload all data
+        await loadCustomerData(customerId)
+        toast.success('✅ Data reconciled successfully!', { id: 'reconciliation' })
+      } else {
+        toast.error(`Reconciliation failed: ${recalcResult.message}`, { id: 'reconciliation' })
+      }
+    } catch (error) {
+      console.error('Reconciliation error:', error)
+      toast.error('Failed to reconcile data', { id: 'reconciliation' })
+    }
+  }
+
+  const handlePaymentSubmit = async (data) => {
+    // Debug logs removed to prevent console flooding
+    
+    // Prevent multiple submissions using ref (synchronous check)
+    if (paymentLoadingRef.current || paymentLoading) {
+      console.log('⚠️ Payment already in progress, ignoring duplicate submission')
+      return
+    }
+    
+    if (!selectedCustomer) {
+      toast.error('Please select a customer first')
+      return
+    }
+    
+    // Set loading state IMMEDIATELY (both ref and state)
+    paymentLoadingRef.current = true
+    setPaymentLoading(true)
+    
+    try {
+      
+      // Generate idempotency key for duplicate prevention
+      const idempotencyKey = crypto.randomUUID()
+      
+      // CRITICAL: Validate amount first with strict checks
+      const amount = parseFloat(data.amount)
+      if (!amount || amount <= 0 || isNaN(amount) || !isFinite(amount)) {
+        toast.error('Please enter a valid payment amount greater than 0')
+        paymentLoadingRef.current = false
+        setPaymentLoading(false)
+        return
+      }
+      
+      // CRITICAL: Validate amount doesn't exceed reasonable limit
+      if (amount > 10000000) {
+        toast.error('Payment amount exceeds maximum limit (10,000,000)')
+        paymentLoadingRef.current = false
+        setPaymentLoading(false)
+        return
+      }
+
+      const paymentData = {
+        customerId: selectedCustomer.id,
+        saleId: data.saleId ? parseInt(data.saleId) : null,
+        amount: amount,
+        mode: data.method || data.mode || 'CASH', // Default to CASH if not provided
+        reference: data.ref || data.reference || null,
+        paymentDate: data.paymentDate || new Date().toISOString()
+      }
+
+      console.log('✅ Submitting payment with data:', paymentData)
+      console.log('✅ Idempotency key:', idempotencyKey)
+      
+      // Add timeout to prevent hanging (30 seconds)
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Payment request timed out after 30 seconds')), 30000)
+      )
+      
+      console.log('📡 Sending payment request to API...')
+      const response = await Promise.race([
+        paymentsAPI.createPayment(paymentData, idempotencyKey),
+        timeoutPromise
+      ])
+      console.log('✅ Payment API response received:', response)
+      
+      // Backend returns: { success: true, message: "...", data: { payment, invoice, customer } }
+      if (response?.success) {
+        const paymentResult = response?.data?.payment || response?.data
+        const invoiceResult = response?.data?.invoice
+        const mode = paymentResult?.mode || paymentResult?.method || data.method || 'CASH'
+        const amount = paymentResult?.amount || data.amount
+        
+        toast.success(`✅ Payment saved: ${formatCurrency(amount)} (${mode})`)
+        
+        if (invoiceResult) {
+          const status = invoiceResult.status || invoiceResult.paymentStatus || 'PENDING'
+          toast.success(`Invoice ${invoiceResult.invoiceNo || ''} status: ${status}`)
+        }
+        
+        setShowPaymentModal(false)
+        setPaymentModalInvoiceId(null)
+        resetPaymentForm() // Reset payment form after successful submission
+        
+        // INSTANT UPDATE: Reload ALL customer data immediately to refresh balances, invoices, and outstanding bills
+        await Promise.all([
+          loadCustomerData(selectedCustomer.id, { strictValidation: true }), // Refresh current customer section data
+          fetchCustomers() // Refresh only customer list
+        ])
+        
+        // Trigger global data refresh events for other pages (reports, dashboard, etc.)
+        window.dispatchEvent(new CustomEvent('paymentCreated', { detail: { customerId: selectedCustomer.id, payment: paymentResult } }))
+        window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments', customerId: selectedCustomer.id } }))
+      } else {
+        toast.error(response?.message || 'Failed to save payment')
+      }
+    } catch (error) {
+      // Log error once (prevent flooding)
+      if (!error._logged) {
+        console.error('❌ Payment error:', error?.response?.data || error?.message)
+        error._logged = true
+      }
+      
+      // Handle HTTP 409 Conflict (concurrent modification)
+      if (error.message?.includes('CONFLICT') || error.response?.status === 409) {
+        toast.error('Another user updated this invoice. Refreshing data...', {
+          duration: 5000,
+          icon: '⚠️'
+        })
+        // Refresh customer data to get latest invoice status
+        await loadCustomerData(selectedCustomer.id)
+        await fetchCustomers()
+      } else {
+        // Safely extract error message
+        let errorMsg = 'Failed to save payment'
+        if (error?.response?.data?.message) {
+          errorMsg = error.response.data.message
+        } else if (error?.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+          errorMsg = error.response.data.errors.join(', ')
+        } else if (error?.message) {
+          errorMsg = error.message
+        }
+        
+        toast.error(errorMsg, {
+          duration: 5000
+        })
+      }
+    } finally {
+      // Reset loading state (both ref and state)
+      paymentLoadingRef.current = false
+      setPaymentLoading(false)
+    }
+  }
+
+  const handlePrintStatementPDF = () => {
+    if (!selectedCustomer || !selectedCustomer.id || selectedCustomer.id === 'cash') {
+      toast.error('Please select a customer first')
+      return
+    }
+    openStatementPdfForPrint(
+      selectedCustomer.id,
+      dateRange.from,
+      dateRange.to,
+      selectedCustomer.name
+    )
+  }
+
+  const handleDownloadStatementPDF = async () => {
+    if (!selectedCustomer || !selectedCustomer.id) {
+      toast.error('Please select a customer first')
+      return
+    }
+    if (selectedCustomer.id === 'cash') {
+      toast.error('Not available for cash customer view')
+      return
+    }
+
+    setPdfLoading(true)
+    try {
+      await downloadStatementPdf(
+        selectedCustomer.id,
+        dateRange.from,
+        dateRange.to,
+        selectedCustomer.name || 'Customer'
+      )
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  const handlePrintPendingBillsPDF = () => {
+    if (!selectedCustomer || !selectedCustomer.id || selectedCustomer.id === 'cash') {
+      toast.error('Please select a customer first')
+      return
+    }
+    openPendingBillsPdfForPrint(
+      selectedCustomer.id,
+      dateRange.from,
+      dateRange.to,
+      selectedCustomer.name
+    )
+  }
+
+  const handleDownloadPendingBillsPDF = async () => {
+    if (!selectedCustomer || !selectedCustomer.id || selectedCustomer.id === 'cash') {
+      toast.error('Please select a customer first')
+      return
+    }
+
+    setPdfLoading(true)
+    try {
+      await downloadPendingBillsPdf(
+        selectedCustomer.id,
+        dateRange.from,
+        dateRange.to,
+        selectedCustomer.name || 'Customer'
+      )
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  const handleExportStatement = async () => {
+    handlePrintStatementPDF()
+  }
+
+  handleExportPDFRef.current = handlePrintStatementPDF
+  handleExportStatementRef.current = handleExportStatement
+
+  // WhatsApp Sharing Handler
+  const handleShareWhatsApp = () => {
+    if (!selectedCustomer || customerLedger.length === 0) {
+      toast.error('No data to share')
+      return
+    }
+
+    try {
+      const filteredEntries = customerLedger.filter(entry => {
+        const entryDate = new Date(entry.date)
+        const fromDate = new Date(dateRange.from)
+        const toDate = new Date(dateRange.to)
+        toDate.setHours(23, 59, 59, 999)
+        return entryDate >= fromDate && entryDate <= toDate
+      })
+
+      const totalDebit = filteredEntries.reduce((sum, e) => sum + (e.debit || 0), 0)
+      const totalCredit = filteredEntries.reduce((sum, e) => sum + (e.credit || 0), 0)
+      const closingBalance = filteredEntries.length > 0 ? filteredEntries[filteredEntries.length - 1].balance : 0
+
+      const message = `*Customer Ledger Statement*\n\n` +
+        `*Customer:* ${selectedCustomer.name}\n` +
+        `*TRN:* ${selectedCustomer.trn || 'N/A'}\n` +
+        `*Phone:* ${selectedCustomer.phone || 'N/A'}\n` +
+        `*Period:* ${new Date(dateRange.from).toLocaleDateString()} to ${new Date(dateRange.to).toLocaleDateString()}\n\n` +
+        `*Summary:*\n` +
+        `Total Sales: ${formatCurrency(totalDebit)}\n` +
+        `Payments Received: ${formatCurrency(totalCredit)}\n` +
+        `Outstanding: ${formatCurrency(totalDebit - totalCredit)}\n` +
+        `Closing Balance: ${formatBalance(closingBalance)}\n\n` +
+        `_Generated on ${new Date().toLocaleString()}_`
+
+      const phoneNumber = selectedCustomer.phone?.replace(/\D/g, '') || ''
+      if (phoneNumber) {
+        const url = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`
+    window.open(url, '_blank')
+        toast.success('Opening WhatsApp...')
+      } else {
+        // Copy to clipboard if no phone
+        navigator.clipboard.writeText(message)
+        toast.success('Statement copied to clipboard!')
+      }
+    } catch (error) {
+      console.error('Share error:', error)
+      toast.error('Failed to share statement')
+    }
+  }
+
+  const getStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'paid': return 'bg-green-100 text-green-800'
+      case 'partial': return 'bg-yellow-100 text-yellow-800'
+      case 'pending': return 'bg-red-100 text-red-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getStatusIcon = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'paid': return <CheckCircle className="h-4 w-4 text-green-600" />
+      case 'partial': return <Clock className="h-4 w-4 text-yellow-600" />
+      case 'pending': return <XCircle className="h-4 w-4 text-red-600" />
+      default: return <Clock className="h-4 w-4 text-gray-600" />
+    }
+  }
+
+
+  if (customersLoading && customers.length === 0 && !selectedCustomer) {
+    return <LoadingCard message="Loading customers..." />
+  }
+
+  return (
+    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden max-w-full">
+      {/* TOP BAR - Header - Responsive */}
+      <div className="bg-white border-b-2 border-gray-300 px-3 sm:px-6 py-2 sm:py-3 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
+          <div className="flex items-center space-x-3 sm:space-x-6">
+            <div>
+              <h1 className="text-base sm:text-xl font-bold text-gray-900">STARPLUS FOODSTUFF TRADING</h1>
+              <p className="text-xs sm:text-sm text-gray-600">CUSTOMER LEDGER MODULE</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            <div className="text-right">
+              <p className="text-sm text-gray-600">Date: {new Date().toLocaleDateString('en-GB')}</p>
+              <p className="text-sm text-gray-600">User: {user?.name || 'Admin'} ({user?.role || 'Admin'})</p>
+            </div>
+            <div className="flex items-center space-x-1">
+              {selectedCustomer?.id && selectedCustomer.id !== 'cash' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDownloadStatementPDF}
+                    disabled={pdfLoading}
+                    className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Download PDF Statement"
+                  >
+                    {pdfLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePrintStatementPDF}
+                    disabled={pdfLoading}
+                    className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Print PDF Statement (F7)"
+                  >
+                    {pdfLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" />
+                    ) : (
+                      <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    )}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => selectedCustomer && loadCustomerData(selectedCustomer.id, { strictValidation: true })}
+                className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                title="Refresh"
+                disabled={!selectedCustomer}
+              >
+                <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              </button>
+              <button
+                onClick={handleManualReconciliation}
+                className="p-1 sm:p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                title="Reconcile & Verify Data (Validates all transactions and recalculates balance)"
+                disabled={!selectedCustomer || loading}
+              >
+                <CheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              </button>
+              <button
+                className="p-1 sm:p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                title="Settings"
+              >
+                <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-white">
+        {/* TOP BAR - Customer Search (Compact) */}
+        <div className="bg-gray-50 border-b border-gray-300 p-2 flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+            <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search Customer (F2)"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              console.log('🔵 Add Customer button clicked')
+              setShowAddCustomerModal(true)
+            }}
+            className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 active:bg-blue-800 flex items-center space-x-1.5 transition-colors whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            title="Add New Customer"
+            type="button"
+          >
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Add Customer</span>
+          </button>
+          {selectedCustomer && (
+            <div className="px-3 py-1.5 bg-blue-100 text-blue-800 text-sm rounded-md font-medium whitespace-nowrap">
+              {selectedCustomer.name}
+            </div>
+          )}
+          <div className="text-xs text-gray-600 whitespace-nowrap ml-auto">
+            Total: {customers.length}
+          </div>
+        </div>
+
+        {/* CUSTOMER SELECTION DROPDOWN (if search active or no customer selected) */}
+        {(searchTerm || !selectedCustomer) && (
+          <div className="bg-white border-b border-gray-200 max-h-[50vh] overflow-y-auto">
+            <div className="p-2 space-y-1">
+              {/* Cash Customer Option */}
+              <button
+                onClick={() => {
+                  setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
+                  loadCustomerData('cash')
+                }}
+                className={`w-full text-left p-2 rounded-lg transition-colors text-sm ${
+                  selectedCustomer?.id === 'cash'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-blue-50 hover:bg-blue-100 text-gray-900 border border-blue-200'
+                }`}
+              >
+                <div className="font-medium">Cash Customer</div>
+                <div className={`text-xs ${selectedCustomer?.id === 'cash' ? 'text-blue-100' : 'text-gray-600'}`}>
+                  All cash sales and payments • Balance: 0.00
+                </div>
+              </button>
+              
+              {/* Regular Customers */}
+              {filteredCustomers.length > 0 && filteredCustomers.slice(0, 10).map((customer) => (
+                <button
+                  key={customer.id}
+                  onClick={() => handleSelectCustomer(customer)}
+                  className={`w-full text-left p-2 rounded-lg transition-colors text-sm ${
+                    selectedCustomer?.id === customer.id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-50 hover:bg-gray-100 text-gray-900'
+                  }`}
+                >
+                  <div className="font-medium truncate">{customer.name}</div>
+                  <div className={`text-xs ${selectedCustomer?.id === customer.id ? 'text-blue-100' : 'text-gray-600'}`}>
+                    {customer.phone} • Balance: {formatBalance(customer.balance || 0)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* MAIN LEDGER VIEW */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {!selectedCustomer ? (
+            <div className="flex-1 flex items-center justify-center py-8">
+              <div className="text-center max-w-sm">
+                <Users className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                <p className="text-base font-medium text-gray-600">Search and select a customer to view ledger</p>
+                <p className="text-xs text-gray-500 mt-1">Use the search bar above (Press F2 to focus)</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Compact Customer Info & Summary Bar */}
+              <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Customer Info - Compact */}
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 truncate">{selectedCustomer.name}</p>
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        {selectedCustomer.id !== 'cash' && selectedCustomer.trn && <span>TRN: {selectedCustomer.trn}</span>}
+                        {selectedCustomer.id !== 'cash' && selectedCustomer.phone && <span>• {selectedCustomer.phone}</span>}
+                        {selectedCustomer.id !== 'cash' && selectedCustomer.address && <span className="hidden lg:inline">• {selectedCustomer.address}</span>}
+                        {selectedCustomer.id === 'cash' && <span className="text-blue-600 font-medium">All cash sales and payments</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons - Compact */}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {selectedCustomer.id !== 'cash' && (
+                      <>
+                        <button
+                          onClick={() => {
+                            // Open edit modal directly instead of navigating
+                            setEditingCustomer(selectedCustomer)
+                            // Pre-fill form with current customer data
+                            customerForm.setValue('name', selectedCustomer.name)
+                            customerForm.setValue('phone', selectedCustomer.phone || '')
+                            customerForm.setValue('email', selectedCustomer.email || '')
+                            customerForm.setValue('trn', selectedCustomer.trn || '')
+                            customerForm.setValue('address', selectedCustomer.address || '')
+                            customerForm.setValue('creditLimit', selectedCustomer.creditLimit || 0)
+                            setShowEditCustomerModal(true)
+                          }}
+                          className="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 flex items-center gap-1 transition-colors"
+                          title="Edit Customer (F3)"
+                        >
+                          <Edit className="h-3 w-3" />
+                          <span className="hidden sm:inline">Edit</span>
+                        </button>
+                        <button
+                          onClick={() => setShowPaymentModal(true)}
+                          className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
+                          title="Add Payment (F4)"
+                        >
+                          <Plus className="h-3 w-3" />
+                          <span className="hidden sm:inline">Payment</span>
+                        </button>
+                      </>
+                    )}
+                    {selectedCustomer.id !== 'cash' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleExportStatement}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Ledger Statement (F5)"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <FileText className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Statement</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePrintPendingBillsPDF}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Pending Bills PDF (Outstanding Invoices Only) - Uses Date Filter"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <DollarSign className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Pending Bills</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadStatementPDF}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-800 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Download ledger statement PDF"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Download className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Download</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePrintStatementPDF}
+                          disabled={pdfLoading}
+                          className="px-2 py-1 bg-blue-700 text-white text-xs rounded hover:bg-blue-800 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Print ledger statement PDF (F7)"
+                        >
+                          {pdfLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Printer className="h-3 w-3" />
+                          )}
+                          <span className="hidden lg:inline">Print</span>
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={handleShareWhatsApp}
+                      className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600 flex items-center transition-colors"
+                      title="WhatsApp"
+                    >
+                      <Send className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Date Range Filter - Compact */}
+              <div className="bg-gray-50 border-b border-gray-200 px-3 py-1.5 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700">Date Range:</label>
+                <Input
+                  type="date"
+                  value={dateRange.from}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+                  className="w-40"
+                />
+                <span className="text-gray-600">to</span>
+                <Input
+                  type="date"
+                  value={dateRange.to}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+                  className="w-40"
+                />
+              </div>
+
+              {/* TAB SECTIONS - Full Width - Mobile Optimized */}
+              <div className="flex-1 flex flex-col overflow-hidden w-full">
+                <div className="border-b border-gray-300 bg-white w-full sticky top-0 z-10">
+                  <div className="overflow-x-auto w-full scrollbar-hide">
+                    <div className="flex space-x-1 px-2 min-w-max">
+                      {[
+                        { id: 'ledger', name: '📊 Ledger', mobileName: 'Ledger', icon: FileText },
+                        { id: 'invoices', name: '🧾 Invoices', mobileName: 'Invoices', icon: FileText },
+                        { id: 'payments', name: '💰 Payments', mobileName: 'Payments', icon: CreditCard },
+                        { id: 'reports', name: '📈 Reports', mobileName: 'Reports', icon: TrendingUp }
+                      ].map((tab) => {
+                        const Icon = tab.icon
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`px-3 md:px-4 py-2.5 md:py-3 flex items-center space-x-1.5 md:space-x-2 border-b-2 transition-colors whitespace-nowrap text-xs md:text-sm ${
+                              activeTab === tab.id
+                                ? 'border-blue-600 text-blue-600 font-medium bg-blue-50'
+                                : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                            }`}
+                          >
+                            <Icon className="h-3.5 w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                            <span className="hidden sm:inline">{tab.name}</span>
+                            <span className="sm:hidden">{tab.mobileName}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* TAB CONTENT - Full Width - Zero Padding */}
+                <div className="flex-1 overflow-auto w-full">
+                  {activeTab === 'ledger' && (
+                    <LedgerStatementTab 
+                      ledgerEntries={customerLedger
+                        .filter(entry => {
+                          // CRITICAL: Validate entry belongs to selected customer (extra safety check)
+                          // Backend should already filter, but this prevents any data leakage
+                          if (!selectedCustomer) return false
+                          
+                          const entryDate = new Date(entry.date)
+                          const fromDate = new Date(dateRange.from)
+                          const toDate = new Date(dateRange.to)
+                          toDate.setHours(23, 59, 59, 999)
+                          const inDateRange = entryDate >= fromDate && entryDate <= toDate
+                          if (!inDateRange) return false
+                          
+                          // Apply filters
+                          if (ledgerFilters.status !== 'all') {
+                            const statusMatch = entry.status?.toLowerCase() === ledgerFilters.status.toLowerCase()
+                            if (!statusMatch && entry.type !== 'Payment') return false
+                          }
+                          if (ledgerFilters.type !== 'all') {
+                            if (entry.type !== ledgerFilters.type) return false
+                          }
+                          
+                          return true
+                        })}
+                      customer={selectedCustomer}
+                      onExportExcel={handleExportExcel}
+                      onGeneratePDF={handleDownloadStatementPDF}
+                      onPrintPDF={handlePrintStatementPDF}
+                      pdfLoading={pdfLoading}
+                      onShareWhatsApp={handleShareWhatsApp}
+                      filters={ledgerFilters}
+                      onFilterChange={(key, value) => setLedgerFilters(prev => ({ ...prev, [key]: value }))}
+                    />
+                  )}
+                  
+                  {activeTab === 'invoices' && (
+                    <InvoicesTab 
+                      invoices={customerInvoices}
+                      outstandingInvoices={outstandingInvoices}
+                      user={user}
+                      onViewInvoice={(invoiceId) => {
+                        setSelectedInvoiceForView(invoiceId)
+                        setShowInvoiceModal(true)
+                      }}
+                      onViewPDF={(invoiceId) => {
+                        const inv = customerInvoices.find(i => i.id === invoiceId)
+                        openInvoicePdfForViewing(invoiceId, inv?.invoiceNo)
+                      }}
+                      onDownloadPDF={(invoiceId) => {
+                        const inv = customerInvoices.find(i => i.id === invoiceId)
+                        downloadInvoicePdf(invoiceId, inv?.invoiceNo)
+                      }}
+                      onPrintPDF={(invoiceId) => {
+                        const inv = customerInvoices.find(i => i.id === invoiceId)
+                        openInvoicePdfForPrint(invoiceId, inv?.invoiceNo)
+                      }}
+                      onEditInvoice={(invoiceId) => {
+                        // Navigate to POS with edit mode using React Router
+                        navigate(`/pos?editId=${invoiceId}`)
+                      }}
+                      onPayInvoice={(invoiceId) => {
+                        setPaymentModalInvoiceId(invoiceId)
+                        setShowPaymentModal(true)
+                      }}
+                      onUnlockInvoice={async (invoiceId) => {
+                        const reason = prompt('Please provide reason for unlocking this invoice:')
+                        if (!reason?.trim()) {
+                          toast.error('Unlock reason is required')
+                          return
+                        }
+                        try {
+                          const response = await salesAPI.unlockInvoice(invoiceId, reason)
+                          if (response.success) {
+                            toast.success('✅ Invoice unlocked successfully!')
+                            if (selectedCustomer) {
+                              await loadCustomerData(selectedCustomer.id)
+                            }
+                          } else {
+                            toast.error(response.message || 'Failed to unlock invoice')
+                          }
+                        } catch (error) {
+                          toast.error(error?.response?.data?.message || 'Failed to unlock invoice')
+                        }
+                      }}
+                      onDeleteInvoice={async (invoiceId) => {
+                        const confirmText = prompt('⚠️ WARNING: Type DELETE to confirm deletion of this invoice.\n\nThis will restore stock and cannot be undone!')
+                        if (confirmText?.trim().toUpperCase() !== 'DELETE') {
+                          if (confirmText !== null) toast.error('Deletion cancelled. You must type DELETE to confirm.')
+                          return
+                        }
+                        try {
+                          const response = await salesAPI.deleteSale(invoiceId)
+                          if (response.success) {
+                            toast.success('✅ Invoice deleted successfully!')
+                            if (selectedCustomer) {
+                              // Reload customer data to update ledger
+                              await loadCustomerData(selectedCustomer.id)
+                              // Refresh customer list
+                              await fetchCustomers()
+                            }
+                          } else {
+                            toast.error(response.message || 'Failed to delete invoice')
+                          }
+                        } catch (error) {
+                          toast.error(error?.response?.data?.message || 'Failed to delete invoice')
+                        }
+                      }}
+                    />
+                  )}
+                  
+                  {activeTab === 'payments' && (
+                    <PaymentsTab 
+                      payments={customerPayments}
+                      user={user}
+                      selectedPaymentIds={selectedPaymentIds}
+                      onTogglePayment={(id) => {
+                        setSelectedPaymentIds(prev =>
+                          prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+                        )
+                      }}
+                      onClearSelection={() => setSelectedPaymentIds([])}
+                      onViewReceipt={(paymentId) => {
+                        setSelectedPaymentIds([paymentId])
+                        setShowReceiptModal(true)
+                      }}
+                      onGenerateReceipt={() => setShowReceiptModal(true)}
+                      onDownloadReceiptPdf={async (payment) => {
+                        try {
+                          const res = await paymentsAPI.generateReceipt(payment.id)
+                          const data = res?.data ?? res
+                          const receiptId = data?.id ?? data?.Id
+                          if (receiptId == null) throw new Error('Invalid receipt')
+                          downloadReceiptPdf(receiptId, data?.receiptNumber || data?.ReceiptNumber)
+                        } catch (e) {
+                          toast.error(e?.message || 'Failed to download receipt PDF')
+                        }
+                      }}
+                      onPrintReceiptPdf={async (payment) => {
+                        try {
+                          const res = await paymentsAPI.generateReceipt(payment.id)
+                          const data = res?.data ?? res
+                          const receiptId = data?.id ?? data?.Id
+                          if (receiptId == null) throw new Error('Invalid receipt')
+                          openReceiptPdfForPrint(receiptId, data?.receiptNumber || data?.ReceiptNumber)
+                        } catch (e) {
+                          toast.error(e?.message || 'Failed to print receipt PDF')
+                        }
+                      }}
+                      onSelectAll={(checked) => setSelectedPaymentIds(checked ? customerPayments.map(p => p.id) : [])}
+                      onEditPayment={async (payment) => {
+                        // Handle edit payment
+                        try {
+                          const newAmount = prompt(`Edit payment amount (current: ${formatCurrency(payment.amount)}):`, payment.amount)
+                          if (newAmount === null) return // User cancelled
+                          
+                          const amountValue = parseFloat(newAmount)
+                          if (!newAmount || isNaN(amountValue) || amountValue <= 0) {
+                            toast.error('Invalid amount. Please enter a valid positive number.')
+                            return
+                          }
+
+                          const currentMode = payment.method || payment.mode || 'CASH'
+                          const newMode = prompt(`Edit payment mode (current: ${currentMode}):\nOptions: CASH, CHEQUE, ONLINE, CREDIT`, currentMode)
+                          if (newMode === null) return // User cancelled
+                          
+                          const modeUpper = newMode?.trim().toUpperCase()
+                          if (!modeUpper || !['CASH', 'CHEQUE', 'ONLINE', 'CREDIT'].includes(modeUpper)) {
+                            toast.error('Invalid payment mode. Please select: CASH, CHEQUE, ONLINE, or CREDIT')
+                            return
+                          }
+
+                          toast.loading('Updating payment...', { id: 'update-payment' })
+                          
+                          const response = await paymentsAPI.updatePayment(payment.id, {
+                            amount: amountValue,
+                            mode: modeUpper,
+                            reference: payment.ref || payment.reference || null,
+                            paymentDate: payment.paymentDate
+                          })
+                          
+                          if (response?.success) {
+                            toast.success('Payment updated successfully', { id: 'update-payment' })
+                            // Refresh customer data
+                            if (selectedCustomer) {
+                              await loadCustomerData(selectedCustomer.id)
+                              await fetchCustomers()
+                              window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments', customerId: selectedCustomer.id } }))
+                            }
+                          } else {
+                            toast.error(response?.message || 'Failed to update payment', { id: 'update-payment' })
+                          }
+                        } catch (error) {
+                          console.error('Error updating payment:', error)
+                          const errorMsg = error?.response?.data?.message || error?.message || 'Failed to update payment'
+                          toast.error(errorMsg, { id: 'update-payment' })
+                        }
+                      }}
+                      onDeletePayment={async (payment) => {
+                        // Handle delete payment
+                        try {
+                          const confirmDelete = window.confirm(
+                            `⚠️ DELETE PAYMENT\n\n` +
+                            `Amount: ${formatCurrency(payment.amount)}\n` +
+                            `Mode: ${payment.method || payment.mode || 'N/A'}\n` +
+                            `Date: ${new Date(payment.paymentDate).toLocaleDateString('en-GB')}\n\n` +
+                            `This will reverse the payment effects on the invoice and customer balance.\n\n` +
+                            `Are you sure you want to delete this payment?`
+                          )
+                          
+                          if (!confirmDelete) return // User cancelled
+                          
+                          toast.loading('Deleting payment...', { id: 'delete-payment' })
+                          
+                          const response = await paymentsAPI.deletePayment(payment.id)
+                          
+                          if (response?.success) {
+                            toast.success('Payment deleted successfully', { id: 'delete-payment' })
+                            // Refresh customer data
+                            if (selectedCustomer) {
+                              await loadCustomerData(selectedCustomer.id)
+                              await fetchCustomers()
+                              window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { scope: 'payments', customerId: selectedCustomer.id } }))
+                            }
+                          } else {
+                            toast.error(response?.message || 'Failed to delete payment', { id: 'delete-payment' })
+                          }
+                        } catch (error) {
+                          console.error('Error deleting payment:', error)
+                          const errorMsg = error?.response?.data?.message || error?.message || 'Failed to delete payment'
+                          toast.error(errorMsg, { id: 'delete-payment' })
+                        }
+                      }}
+                    />
+                  )}
+                  
+                  {activeTab === 'reports' && (
+                    <ReportsTab 
+                      customer={selectedCustomer}
+                      summary={customerSummary}
+                      invoices={customerInvoices}
+                      payments={customerPayments}
+                      outstandingInvoices={outstandingInvoices}
+                    />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Payment Entry Modal */}
+      <PaymentEntryModal
+        isOpen={showPaymentModal}
+        onClose={() => {
+          setShowPaymentModal(false)
+          resetPaymentForm()
+          setPaymentModalInvoiceId(null)
+        }}
+        customer={selectedCustomer}
+        invoiceId={paymentModalInvoiceId}
+        outstandingInvoices={outstandingInvoices}
+        allInvoices={customerInvoices}
+        onSubmit={handlePaymentSubmit}
+        register={paymentRegister}
+        handleSubmit={handlePaymentFormSubmit}
+        errors={paymentErrors}
+        setValue={setPaymentValue}
+        watch={watchPayment}
+        loading={paymentLoading}
+      />
+
+      {/* Invoice Preview Modal */}
+      {showInvoiceModal && selectedInvoiceForView && (
+        <InvoicePreviewModal
+          saleId={selectedInvoiceForView}
+          invoiceNo={customerInvoices.find(inv => inv.id === selectedInvoiceForView)?.invoiceNo}
+          onClose={() => {
+            setShowInvoiceModal(false)
+            setSelectedInvoiceForView(null)
+          }}
+        />
+      )}
+
+      <ReceiptPreviewModal
+        paymentIds={showReceiptModal ? selectedPaymentIds : []}
+        isOpen={showReceiptModal}
+        onClose={() => {
+          setShowReceiptModal(false)
+        }}
+      />
+
+      {/* Add Customer Modal */}
+      <Modal
+        isOpen={showAddCustomerModal}
+        onClose={() => {
+          setShowAddCustomerModal(false)
+          resetCustomerForm()
+        }}
+      title="Add New Customer"
+      size="lg"
+    >
+        <form 
+          onSubmit={handleCustomerSubmit((data) => {
+            console.log('✅ Customer form submitted with data:', data)
+            handleAddCustomer(data)
+          }, (errors) => {
+            console.log('❌ Customer form validation errors:', errors)
+            const errorMessages = Object.values(errors).map(e => e?.message).filter(Boolean)
+            if (errorMessages.length > 0) {
+              toast.error(errorMessages[0] || 'Please fix the form errors')
+            }
+          })} 
+          className="space-y-4"
+        >
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Customer Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Enter customer name"
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                customerErrors.name ? 'border-red-500' : 'border-gray-300'
+              }`}
+              {...customerRegister('name', { required: 'Customer name is required' })}
+            />
+            {customerErrors.name && (
+              <p className="mt-1 text-sm text-red-600">{customerErrors.name.message}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input
+              type="text"
+              placeholder="+971 50 123 4567"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('phone')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              placeholder="customer@example.com"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('email')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">TRN</label>
+            <input
+              type="text"
+              placeholder="Tax Registration Number"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('trn')}
+            />
+          </div>
+
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+            <input
+              type="text"
+              placeholder="Full address"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('address')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Credit Limit</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              defaultValue={0}
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                customerErrors.creditLimit ? 'border-red-500' : 'border-gray-300'
+              }`}
+              {...customerRegister('creditLimit', { 
+                valueAsNumber: true,
+                min: { value: 0, message: 'Credit limit must be 0 or greater' }
+              })}
+            />
+            {customerErrors.creditLimit && (
+              <p className="mt-1 text-sm text-red-600">{customerErrors.creditLimit.message}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end space-x-3 pt-4 border-t">
+          <button
+            type="button"
+              onClick={() => {
+                setShowAddCustomerModal(false)
+                resetCustomerForm()
+              }}
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={customerLoading || customerLoadingRef.current}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            style={{ 
+              pointerEvents: (customerLoading || customerLoadingRef.current) ? 'none' : 'auto',
+              cursor: (customerLoading || customerLoadingRef.current) ? 'not-allowed' : 'pointer',
+              position: 'relative',
+              zIndex: 10,
+              minWidth: '120px'
+            }}
+          >
+            {customerLoading || customerLoadingRef.current ? (
+              <span className="flex items-center">
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Adding...
+              </span>
+            ) : (
+              'Add Customer'
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+
+    {/* Edit Customer Modal */}
+    <Modal
+      isOpen={showEditCustomerModal}
+      onClose={() => {
+        setShowEditCustomerModal(false)
+        setEditingCustomer(null)
+        resetCustomerForm()
+      }}
+      title="Edit Customer"
+      size="lg"
+    >
+      <form 
+        onSubmit={handleCustomerSubmit((data) => {
+          handleEditCustomer(data)
+        }, (errors) => {
+          const errorMessages = Object.values(errors).map(e => e?.message).filter(Boolean)
+          if (errorMessages.length > 0) {
+            toast.error(errorMessages[0] || 'Please fix the form errors')
+          }
+        })} 
+        className="space-y-4"
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Customer Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Enter customer name"
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                customerErrors.name ? 'border-red-500' : 'border-gray-300'
+              }`}
+              {...customerRegister('name', { required: 'Customer name is required' })}
+            />
+            {customerErrors.name && (
+              <p className="mt-1 text-sm text-red-600">{customerErrors.name.message}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input
+              type="text"
+              placeholder="+971 50 123 4567"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('phone')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              placeholder="customer@example.com"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('email')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">TRN</label>
+            <input
+              type="text"
+              placeholder="Tax Registration Number"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('trn')}
+            />
+          </div>
+
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+            <input
+              type="text"
+              placeholder="Full address"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {...customerRegister('address')}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Credit Limit</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                customerErrors.creditLimit ? 'border-red-500' : 'border-gray-300'
+              }`}
+              {...customerRegister('creditLimit', { 
+                valueAsNumber: true,
+                min: { value: 0, message: 'Credit limit must be 0 or greater' }
+              })}
+            />
+            {customerErrors.creditLimit && (
+              <p className="mt-1 text-sm text-red-600">{customerErrors.creditLimit.message}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end space-x-3 pt-4 border-t">
+          <button
+            type="button"
+            onClick={() => {
+              setShowEditCustomerModal(false)
+              setEditingCustomer(null)
+              resetCustomerForm()
+            }}
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={customerLoading || customerLoadingRef.current}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {customerLoading || customerLoadingRef.current ? (
+              <span className="flex items-center">
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Updating...
+              </span>
+            ) : (
+              'Update Customer'
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+    </div>
+  )
+}
+
+// Add Customer Modal Component removed - now using inline Modal in main component
+
+// Ledger Statement Tab Component - Tally Style Redesign
+const LedgerStatementTab = ({
+  ledgerEntries,
+  customer,
+  onExportExcel,
+  onGeneratePDF,
+  onPrintPDF,
+  pdfLoading,
+  onShareWhatsApp,
+  filters,
+  onFilterChange
+}) => {
+  const closingBalance = ledgerEntries.length > 0 ? ledgerEntries[ledgerEntries.length - 1].balance : 0
+  const totalDebit = ledgerEntries.reduce((sum, e) => sum + (e.debit || 0), 0)
+  const totalCredit = ledgerEntries.reduce((sum, e) => sum + (e.credit || 0), 0)
+
+  return (
+    <div className="w-full h-full flex flex-col bg-gray-50">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="bg-white rounded-lg shadow p-3 border-l-4 border-blue-500">
+          <div className="text-xs text-gray-500 uppercase">Total Sales</div>
+          <div className="text-lg font-bold text-gray-900">{formatCurrency(totalDebit)}</div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-3 border-l-4 border-green-500">
+          <div className="text-xs text-gray-500 uppercase">Payments Received</div>
+          <div className="text-lg font-bold text-green-600">{formatCurrency(totalCredit)}</div>
+        </div>
+        <div className={`bg-white rounded-lg shadow p-3 border-l-4 ${
+          closingBalance < 0 ? 'border-green-500' : closingBalance > 0 ? 'border-red-500' : 'border-gray-500'
+        }`}>
+          <div className="text-xs text-gray-500 uppercase">Closing Balance</div>
+          <div className={`text-lg font-bold ${
+            closingBalance < 0 ? 'text-green-600' : closingBalance > 0 ? 'text-red-600' : 'text-gray-900'
+          }`}>
+            {formatBalance(closingBalance)}
+          </div>
+        </div>
+      </div>
+
+      {/* Action Bar with Filters */}
+      <div className="bg-white rounded-lg shadow mb-3 p-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm font-medium text-gray-700">Ledger Statement</span>
+          </div>
+          <div className="flex items-center space-x-2 flex-wrap">
+            {/* Advanced Filters */}
+            <select
+              value={filters?.status || 'all'}
+              onChange={(e) => onFilterChange?.('status', e.target.value)}
+              className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="all">All Status</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="unpaid">Unpaid</option>
+            </select>
+            <select
+              value={filters?.type || 'all'}
+              onChange={(e) => onFilterChange?.('type', e.target.value)}
+              className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="all">All Types</option>
+              <option value="Invoice">Invoices</option>
+              <option value="Payment">Payments</option>
+              <option value="Sale Return">Returns</option>
+            </select>
+            {/* Action Buttons */}
+            <button
+              onClick={onPrintPDF}
+              className="px-3 py-1.5 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 flex items-center space-x-1"
+              title="Print PDF Statement"
+            >
+              <Printer className="h-3 w-3" />
+              <span>Print PDF</span>
+            </button>
+            <button
+              onClick={onExportExcel}
+              className="px-3 py-1.5 text-xs bg-green-500 text-white rounded hover:bg-green-600 flex items-center space-x-1"
+              title="Export to CSV"
+            >
+              <span>CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={onGeneratePDF}
+              disabled={pdfLoading}
+              className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Download PDF Statement"
+            >
+              {pdfLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3" />
+              )}
+              <span>Download PDF</span>
+            </button>
+            <button
+              onClick={onShareWhatsApp}
+              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 flex items-center space-x-1"
+              title="Share via WhatsApp"
+            >
+              <Send className="h-3 w-3" />
+              <span>WhatsApp</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Ledger Table - Tally Style */}
+      <div className="bg-white rounded-lg shadow flex-1 flex flex-col overflow-hidden">
+        <div className="overflow-x-auto overflow-y-auto flex-1">
+          <table className="w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-100 sticky top-0 z-10 border-b-2 border-gray-300">
+              <tr>
+                <th className="px-3 py-2.5 text-left text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Date</th>
+                <th className="px-3 py-2.5 text-left text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Type</th>
+                <th className="px-3 py-2.5 text-left text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Invoice No</th>
+                <th className="px-3 py-2.5 text-left text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Payment Mode</th>
+                <th className="px-3 py-2.5 text-right text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Debit (AED)</th>
+                <th className="px-3 py-2.5 text-right text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Credit (AED)</th>
+                <th className="px-3 py-2.5 text-center text-xs font-bold text-gray-700 uppercase whitespace-nowrap border-r border-gray-300">Status</th>
+                <th className="px-3 py-2.5 text-right text-xs font-bold text-gray-700 uppercase whitespace-nowrap">Balance</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {ledgerEntries.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                    No transactions found
+                  </td>
+                </tr>
+              ) : (
+                ledgerEntries.map((entry, idx) => {
+                  // Format date - show time only for payments
+                  const showTime = entry.type === 'Payment'
+                  const dateStr = showTime 
+                    ? new Date(entry.date).toLocaleString('en-GB', { 
+                        day: '2-digit', month: '2-digit', year: 'numeric', 
+                        hour: '2-digit', minute: '2-digit' 
+                      })
+                    : new Date(entry.date).toLocaleDateString('en-GB', {
+                        day: '2-digit', month: '2-digit', year: 'numeric'
+                      })
+                  
+                  const invoiceNo = entry.reference || '-'
+                  const status = entry.status || (entry.type === 'Payment' ? '-' : 'Unpaid')
+                  
+                  // Color coding: Debit = light red, Credit = light green
+                  const rowBgColor = entry.debit > 0 
+                    ? 'bg-red-50 hover:bg-red-100' 
+                    : entry.credit > 0 
+                    ? 'bg-green-50 hover:bg-green-100'
+                    : 'hover:bg-gray-50'
+                  
+                  const statusColor = status === 'Paid' ? 'bg-green-100 text-green-800'
+                    : status === 'Partial' ? 'bg-yellow-100 text-yellow-800'
+                    : status === 'Unpaid' ? 'bg-red-100 text-red-800'
+                    : ''
+                  
+                  return (
+                    <tr key={idx} className={rowBgColor}>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-r border-gray-200">
+                        {dateStr}
+                    </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 border-r border-gray-200">
+                        {entry.type}
+                    </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-semibold text-gray-900 border-r border-gray-200">
+                        {invoiceNo}
+                    </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 border-r border-gray-200">
+                        {entry.paymentMode || entry.PaymentMode || '-'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-right font-medium text-gray-900 border-r border-gray-200">
+                      {entry.debit > 0 ? formatCurrency(entry.debit) : '-'}
+                    </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-right font-medium text-gray-900 border-r border-gray-200">
+                      {entry.credit > 0 ? formatCurrency(entry.credit) : '-'}
+                    </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-center border-r border-gray-200">
+                        {status !== '-' ? (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${statusColor}`}>
+                            {status}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-sm text-right font-bold ${
+                      entry.balance < 0 ? 'text-green-600' : entry.balance > 0 ? 'text-red-600' : 'text-gray-900'
+                    }`}>
+                      {formatBalance(entry.balance)}
+                    </td>
+                  </tr>
+                  )
+                })
+              )}
+            </tbody>
+            <tfoot className="bg-gray-100 sticky bottom-0 border-t-2 border-gray-300">
+              <tr>
+                <td colSpan="4" className="px-3 py-2.5 text-right text-sm font-bold text-gray-900 border-r border-gray-300">
+                  CLOSING BALANCE:
+                </td>
+                <td className="px-3 py-2.5 text-right text-sm font-bold text-gray-900 border-r border-gray-300">
+                  {formatCurrency(totalDebit)}
+                </td>
+                <td className="px-3 py-2.5 text-right text-sm font-bold text-gray-900 border-r border-gray-300">
+                  {formatCurrency(totalCredit)}
+                </td>
+                <td className="px-3 py-2.5 text-center text-sm font-bold text-gray-900 border-r border-gray-300">
+                  -
+                </td>
+                <td className={`px-3 py-2.5 text-right text-sm font-bold ${
+                  closingBalance < 0 ? 'text-green-600' : closingBalance > 0 ? 'text-red-600' : 'text-gray-900'
+                }`}>
+                  {formatBalance(closingBalance)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Invoices Tab Component
+const InvoicesTab = ({ invoices, outstandingInvoices, user, onViewInvoice, onViewPDF, onDownloadPDF, onPrintPDF, onEditInvoice, onPayInvoice, onUnlockInvoice, onDeleteInvoice }) => {
+  const isAdmin = user?.role?.toLowerCase() === 'admin'
+  const canEdit = user?.role?.toLowerCase() === 'admin' // Only admins can edit
+  const getStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'paid': return 'bg-green-100 text-green-800'
+      case 'partial': return 'bg-yellow-100 text-yellow-800'
+      case 'pending': return 'bg-red-100 text-red-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getStatusIcon = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'paid': return '🟢'
+      case 'partial': return '🟡'
+      case 'pending': return '🔴'
+      default: return '⚪'
+    }
+  }
+
+  const totalInvoices = invoices.length
+  const totalPending = outstandingInvoices.reduce((sum, inv) => sum + inv.balanceAmount, 0)
+  const totalPaid = invoices
+    .filter(inv => inv.paymentStatus === 'Paid')
+    .reduce((sum, inv) => sum + (inv.grandTotal || 0), 0)
+
+  return (
+    <div className="w-full h-full flex flex-col">
+      <div className="bg-white overflow-hidden flex-1 flex flex-col w-full">
+        <div className="overflow-x-auto overflow-y-auto flex-1 w-full">
+          <table className="w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase whitespace-nowrap">Date</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Invoice No</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 uppercase whitespace-nowrap">Amount</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 uppercase whitespace-nowrap">Paid</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 uppercase whitespace-nowrap">Balance</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 uppercase whitespace-nowrap">Status</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 uppercase whitespace-nowrap">Action</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {invoices.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                    No invoices found
+                  </td>
+                </tr>
+              ) : (
+                invoices.map((invoice) => {
+                  // Use the actual paidAmount from backend, or calculate from grandTotal
+                  const paidAmount = invoice.paidAmount ?? 0
+                  const grandTotal = invoice.grandTotal || invoice.total || 0
+                  const balance = grandTotal - paidAmount
+                  // Use paymentStatus from backend if available, otherwise calculate
+                  const status = invoice.paymentStatus || (balance === 0 ? 'Paid' : paidAmount > 0 ? 'Partial' : 'Pending')
+                  
+                  return (
+                    <tr key={invoice.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                        {new Date(invoice.invoiceDate || invoice.date).toLocaleDateString('en-GB')}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <div className="flex items-center gap-1.5">
+                          <span>{invoice.invoiceNo || `INV-${invoice.id}`}</span>
+                          {invoice.isLocked && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800" title="Invoice locked after 48 hours">
+                              <Lock className="h-3 w-3 mr-0.5" />
+                              Locked
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-900">
+                        {formatCurrency(invoice.grandTotal || invoice.total || 0)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-900">
+                        {formatCurrency(paidAmount)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-900">
+                        {formatCurrency(balance)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-center">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
+                          {getStatusIcon(status)} {status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-center text-sm">
+                        <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                          {/* Pay Button - Only show if invoice has outstanding balance */}
+                          {balance > 0 && onPayInvoice && (
+                            <button
+                              onClick={() => onPayInvoice(invoice.id)}
+                              className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors shadow-sm"
+                              title="Pay Invoice"
+                            >
+                              <Wallet className="h-3 w-3" />
+                              <span className="hidden sm:inline">Pay</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onViewInvoice(invoice.id)}
+                            className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 p-1 rounded transition-colors"
+                            title="View Invoice"
+                          >
+                            <Eye className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          </button>
+                          {canEdit && onEditInvoice && !invoice.isLocked && (
+                            <button
+                              onClick={() => onEditInvoice(invoice.id)}
+                              className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 p-1 rounded transition-colors"
+                              title="Edit Invoice"
+                            >
+                              <Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
+                          {isAdmin && invoice.isLocked && onUnlockInvoice && (
+                            <button
+                              onClick={() => onUnlockInvoice(invoice.id)}
+                              className="text-purple-600 hover:text-purple-900 hover:bg-purple-50 p-1 rounded transition-colors"
+                              title="Unlock Invoice (Admin Only)"
+                            >
+                              <Unlock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
+                          {isAdmin && onDeleteInvoice && (
+                            <button
+                              onClick={() => onDeleteInvoice(invoice.id)}
+                              className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 p-1.5 rounded transition-colors shadow-sm"
+                              title="Delete Invoice (Admin Only)"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onViewPDF(invoice.id)}
+                            className="text-green-600 hover:text-green-900 hover:bg-green-50 p-1 rounded transition-colors"
+                            title="View PDF"
+                          >
+                            <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          </button>
+                          {onDownloadPDF && (
+                            <button
+                              onClick={() => onDownloadPDF(invoice.id)}
+                              className="text-blue-600 hover:text-blue-900 hover:bg-blue-50 p-1 rounded transition-colors"
+                              title="Download PDF to device"
+                            >
+                              <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
+                          {onPrintPDF && (
+                            <button
+                              onClick={() => onPrintPDF(invoice.id)}
+                              className="text-gray-700 hover:text-gray-900 hover:bg-gray-50 p-1 rounded transition-colors"
+                              title="Print PDF"
+                            >
+                              <Printer className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+            <tfoot className="bg-gray-50 sticky bottom-0">
+              <tr>
+                <td colSpan="2" className="px-3 py-2 text-sm font-bold text-gray-900">
+                  Total Invoices: {totalInvoices}
+                </td>
+                <td className="px-3 py-2"></td>
+                <td className="px-3 py-2 text-right text-sm font-bold text-green-600">
+                  Total Paid: {formatCurrency(totalPaid)}
+                </td>
+                <td className="px-3 py-2 text-right text-sm font-bold text-red-600">
+                  Total Pending: {formatCurrency(totalPending)}
+                </td>
+                <td colSpan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Payments Tab Component
+const PaymentsTab = ({ payments, user, selectedPaymentIds = [], onTogglePayment, onSelectAll, onClearSelection, onViewReceipt, onGenerateReceipt, onDownloadReceiptPdf, onPrintReceiptPdf, onEditPayment, onDeletePayment }) => {
+  const isAdmin = user?.role?.toLowerCase() === 'admin'
+  const selectedTotal = payments
+    .filter(p => selectedPaymentIds.includes(p.id))
+    .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+
+  return (
+    <div>
+      <div className="mb-4 flex justify-end">
+        <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center space-x-2">
+          <Filter className="h-4 w-4" />
+          <span>Filter by Mode</span>
+        </button>
+      </div>
+
+      {selectedPaymentIds.length > 0 && (
+        <div className="mb-4 flex items-center justify-between gap-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <span className="text-sm font-medium">
+            {selectedPaymentIds.length} payment(s) selected — Total: {formatCurrency(selectedTotal)}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onGenerateReceipt}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
+            >
+              Generate Receipt
+            </button>
+            <button
+              type="button"
+              onClick={onClearSelection}
+              className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-2 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={payments.length > 0 && selectedPaymentIds.length === payments.length}
+                    onChange={(e) => {
+                      if (e.target.checked && typeof onSelectAll === 'function') onSelectAll(true)
+                      else if (typeof onClearSelection === 'function') onClearSelection()
+                    }}
+                    className="rounded border-gray-300"
+                    title="Select all"
+                  />
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Mode</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Amount</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Related Invoice</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Reference / Remarks</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Action</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {payments.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                    No payments found
+                  </td>
+                </tr>
+              ) : (
+                payments.map((payment) => (
+                  <tr key={payment.id} className="hover:bg-gray-50">
+                    <td className="px-2 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedPaymentIds.includes(payment.id)}
+                        onChange={() => onTogglePayment && onTogglePayment(payment.id)}
+                        className="rounded border-gray-300"
+                      />
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                      {new Date(payment.paymentDate).toLocaleDateString('en-GB')}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                      {payment.method || payment.mode || '-'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                      {formatCurrency(payment.amount)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                      {payment.invoiceNo || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {payment.ref || payment.reference || '-'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => onViewReceipt(payment.id)}
+                          className="text-blue-600 hover:text-blue-900 p-1 rounded transition-colors"
+                          title="View / generate receipt"
+                        >
+                          <FileText className="h-4 w-4" />
+                        </button>
+                        {onDownloadReceiptPdf && (
+                          <button
+                            type="button"
+                            onClick={() => onDownloadReceiptPdf(payment)}
+                            className="text-green-600 hover:text-green-900 p-1 rounded transition-colors"
+                            title="Download receipt PDF"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                        )}
+                        {onPrintReceiptPdf && (
+                          <button
+                            type="button"
+                            onClick={() => onPrintReceiptPdf(payment)}
+                            className="text-gray-700 hover:text-gray-900 p-1 rounded transition-colors"
+                            title="Print receipt PDF"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </button>
+                        )}
+                        {isAdmin && onEditPayment && (
+                          <button
+                            onClick={() => onEditPayment(payment)}
+                            className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 p-1 rounded transition-colors"
+                            title="Edit Payment (Admin Only)"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                        )}
+                        {isAdmin && onDeletePayment && (
+                          <button
+                            onClick={() => onDeletePayment(payment)}
+                            className="bg-red-50 text-red-600 hover:text-white hover:bg-red-600 border border-red-300 p-1 rounded transition-colors"
+                            title="Delete Payment (Admin Only)"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Reports Tab Component
+const ReportsTab = ({ customer, summary, invoices, payments, outstandingInvoices }) => {
+  return (
+    <div className="space-y-6">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Total Sales This Month</p>
+              <p className="text-lg sm:text-2xl font-bold text-blue-600 mt-2">
+                {formatCurrency(summary?.totalSales || 0)}
+              </p>
+            </div>
+            <DollarSign className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+          </div>
+        </div>
+        
+        <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs sm:text-sm font-medium text-gray-600">Payments Received</p>
+              <p className="text-lg sm:text-2xl font-bold text-green-600 mt-2">
+                {formatCurrency(summary?.totalPayments || 0)}
+              </p>
+            </div>
+            <CreditCard className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" />
+          </div>
+        </div>
+        
+        <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs sm:text-sm font-medium text-gray-600">Overdue Invoices</p>
+              <p className="text-lg sm:text-2xl font-bold text-red-600 mt-2">
+                {outstandingInvoices.filter(inv => inv.daysOverdue > 0).length}
+              </p>
+            </div>
+            <Clock className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
+          </div>
+        </div>
+      </div>
+
+      {/* Pending Bills List */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Pending Bills List</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Invoice No</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Amount</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Paid</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Balance</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Days Overdue</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {outstandingInvoices.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                    No pending bills
+                  </td>
+                </tr>
+              ) : (
+                outstandingInvoices.map((inv) => (
+                  <tr key={inv.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {inv.invoiceNo}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                      {new Date(inv.invoiceDate).toLocaleDateString('en-GB')}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                      {formatCurrency(inv.grandTotal)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                      {formatCurrency(inv.paidAmount)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium text-red-600">
+                      {formatCurrency(inv.balanceAmount)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-center">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        inv.daysOverdue > 30 ? 'bg-red-100 text-red-800' :
+                        inv.daysOverdue > 0 ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {inv.daysOverdue} days
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Payment Entry Modal Component
+const PaymentEntryModal = ({ 
+  isOpen, 
+  onClose, 
+  customer, 
+  invoiceId, // Pre-selected invoice ID (from Pay button)
+  outstandingInvoices, 
+  allInvoices = [], // All customer invoices (not just outstanding)
+  onSubmit, 
+  register, 
+  handleSubmit, 
+  errors, 
+  setValue,
+  watch,
+  loading = false
+}) => {
+  const selectedSaleId = watch('saleId')
+  
+  // Combine outstanding and all invoices, prioritizing outstanding ones
+  const allAvailableInvoices = useMemo(() => {
+    // Add all invoices, but use outstanding invoice data if available (has balance info)
+    const invoiceMap = new Map()
+    
+    // First add outstanding invoices
+    outstandingInvoices.forEach(inv => {
+      invoiceMap.set(inv.id, {
+        ...inv,
+        isOutstanding: true,
+        balanceAmount: inv.balanceAmount || 0
+      })
+    })
+    
+    // Then add all other invoices that aren't outstanding
+    allInvoices.forEach(inv => {
+      if (!invoiceMap.has(inv.id)) {
+        const paidAmount = inv.paidAmount || 0
+        const grandTotal = inv.grandTotal || inv.total || 0
+        const balanceAmount = grandTotal - paidAmount
+        
+        invoiceMap.set(inv.id, {
+          id: inv.id,
+          invoiceNo: inv.invoiceNo || `INV-${inv.id}`,
+          invoiceDate: inv.invoiceDate || inv.date,
+          grandTotal: grandTotal,
+          paidAmount: paidAmount,
+          balanceAmount: balanceAmount,
+          isOutstanding: balanceAmount > 0,
+          paymentStatus: inv.paymentStatus || (balanceAmount > 0 ? 'Pending' : 'Paid')
+        })
+      }
+    })
+    
+    // Sort: outstanding first, then by date
+    return Array.from(invoiceMap.values()).sort((a, b) => {
+      if (a.isOutstanding !== b.isOutstanding) {
+        return a.isOutstanding ? -1 : 1
+      }
+      return new Date(b.invoiceDate) - new Date(a.invoiceDate)
+    })
+  }, [outstandingInvoices, allInvoices])
+  
+  // Load invoice amount when modal opens with pre-selected invoice
+  useEffect(() => {
+    if (isOpen && invoiceId) {
+      setValue('saleId', invoiceId.toString())
+      // Find invoice and auto-fill amount
+      const selectedInv = allAvailableInvoices.find(inv => inv.id === invoiceId)
+      if (selectedInv) {
+        setValue('amount', selectedInv.balanceAmount || selectedInv.outstandingAmount || 0)
+      } else {
+        // Try to fetch from API if not in list
+        paymentsAPI.getInvoiceAmount(invoiceId).then(response => {
+          if (response?.data?.success && response.data.data) {
+            const inv = response.data.data
+            setValue('amount', inv.outstandingAmount || 0)
+          }
+        }).catch(err => console.error('Failed to load invoice amount:', err))
+      }
+    } else if (isOpen && !invoiceId) {
+      // Reset when modal opens without pre-selected invoice - use default values
+      setValue('saleId', '')
+      setValue('amount', '')
+      setValue('paymentDate', new Date().toISOString().split('T')[0])
+      setValue('method', 'CASH')
+    }
+  }, [isOpen, invoiceId, allAvailableInvoices, setValue])
+  
+  // Auto-fill amount when invoice selection changes
+  useEffect(() => {
+    if (customer && selectedSaleId && isOpen) {
+      const selectedInv = allAvailableInvoices.find(inv => inv.id === parseInt(selectedSaleId))
+      if (selectedInv && selectedInv.balanceAmount > 0) {
+        setValue('amount', selectedInv.balanceAmount)
+      }
+    }
+  }, [selectedSaleId, customer, allAvailableInvoices, setValue, isOpen])
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Add Payment for Customer – ${customer?.name || ''}`}
+      size="lg"
+    >
+      <form onSubmit={handleSubmit((data) => {
+        console.log('✅ Payment form submitted with data:', data)
+        onSubmit(data)
+      }, (errors) => {
+        console.log('❌ Payment form validation errors:', errors)
+        const errorMessages = Object.values(errors).map(e => e?.message).filter(Boolean)
+        if (errorMessages.length > 0) {
+          toast.error(errorMessages[0] || 'Please fix the form errors before submitting')
+        }
+      })} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Date"
+            type="date"
+            defaultValue={new Date().toISOString().split('T')[0]}
+            required
+            error={errors.paymentDate?.message}
+            {...register('paymentDate', { required: 'Date is required' })}
+          />
+
+          <Select
+            label="Invoice Number (Optional)"
+            options={[
+              { value: '', label: '-- No Invoice (General Payment) --' },
+              ...allAvailableInvoices.map(inv => ({
+                value: inv.id,
+                label: `${inv.invoiceNo} - ${formatCurrency(inv.grandTotal)} - ${inv.balanceAmount > 0 ? `Balance: ${formatCurrency(inv.balanceAmount)}` : 'Paid'}`
+              }))
+            ]}
+            error={errors.saleId?.message}
+            {...register('saleId')}
+          />
+
+          <Input
+            label="Amount"
+            type="number"
+            step="0.01"
+            placeholder="0.00"
+            required
+            error={errors.amount?.message}
+            {...register('amount', { 
+              required: 'Amount is required',
+              min: { value: 0.01, message: 'Amount must be greater than 0' }
+            })}
+          />
+
+          <Select
+            label="Payment Mode"
+            options={[
+              { value: 'CASH', label: 'Cash' },
+              { value: 'CHEQUE', label: 'Cheque' },
+              { value: 'ONLINE', label: 'Online Transfer' },
+              { value: 'CREDIT', label: 'Credit' }
+            ]}
+            required
+            error={errors.method?.message || errors.mode?.message}
+            {...register('method', { required: 'Payment method is required' })}
+          />
+
+          <div className="col-span-2">
+            <Input
+              label="Reference / Remarks"
+              placeholder="Cheque number, transaction reference, notes..."
+              error={errors.ref?.message}
+              {...register('ref')}
+            />
+          </div>
+        </div>
+
+        {selectedSaleId && (
+          <div className={`border rounded-lg p-4 ${
+            allAvailableInvoices.find(inv => inv.id === parseInt(selectedSaleId))?.isOutstanding
+              ? 'bg-blue-50 border-blue-200'
+              : 'bg-gray-50 border-gray-200'
+          }`}>
+            <p className="text-sm font-medium mb-2 flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              <span className={allAvailableInvoices.find(inv => inv.id === parseInt(selectedSaleId))?.isOutstanding ? 'text-blue-900' : 'text-gray-700'}>
+                Selected Invoice Details:
+              </span>
+            </p>
+            {(() => {
+              const selectedInv = allAvailableInvoices.find(inv => inv.id === parseInt(selectedSaleId))
+              if (selectedInv) {
+                return (
+                  <div className="space-y-2 text-sm">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="font-medium text-gray-600">Invoice No:</span>
+                        <span className="ml-2 font-semibold">{selectedInv.invoiceNo}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Date:</span>
+                        <span className="ml-2">{new Date(selectedInv.invoiceDate).toLocaleDateString('en-GB')}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Total Amount:</span>
+                        <span className="ml-2 font-semibold">{formatCurrency(selectedInv.grandTotal)}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Paid:</span>
+                        <span className="ml-2 font-semibold text-green-600">{formatCurrency(selectedInv.paidAmount)}</span>
+                      </div>
+                    </div>
+                    {selectedInv.balanceAmount > 0 ? (
+                      <div className="pt-2 border-t border-blue-300">
+                        <p className="text-red-600 font-bold text-base">
+                          Balance Due: {formatCurrency(selectedInv.balanceAmount)}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          💡 Payment will be allocated to this invoice
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="pt-2 border-t border-gray-300">
+                        <p className="text-green-600 font-semibold">
+                          ✅ Invoice is fully paid
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          ⚠️ This payment will be recorded as a general payment (not allocated to invoice)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+              return null
+            })()}
+          </div>
+        )}
+        
+        {!selectedSaleId && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p className="text-sm text-yellow-800 flex items-center gap-2">
+              <span className="font-medium">ℹ️ General Payment:</span>
+              <span>This payment will not be allocated to any specific invoice. You can select an invoice above to allocate the payment.</span>
+            </p>
+          </div>
+        )}
+
+        <div className="flex justify-end space-x-3 pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            style={{ 
+              pointerEvents: loading ? 'none' : 'auto',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              position: 'relative',
+              zIndex: 10,
+              minWidth: '140px'
+            }}
+          >
+            {loading ? (
+              <span className="flex items-center">
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Saving...
+              </span>
+            ) : (
+              'Save Payment'
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+export default CustomerLedgerPage
+
+

@@ -806,7 +806,7 @@ namespace FrozenApi.Services
                 var sale = new Sale
                 {
                     InvoiceNo = invoiceNo,
-                    InvoiceDate = DateTime.UtcNow,
+                    InvoiceDate = request.InvoiceDate ?? _timeZoneService.ConvertToUtc(_timeZoneService.GetCurrentTime()),
                     CustomerId = request.CustomerId,
                     Subtotal = subtotal,
                     VatTotal = vatTotal,
