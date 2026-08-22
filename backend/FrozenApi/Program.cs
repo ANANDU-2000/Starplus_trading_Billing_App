@@ -20,6 +20,9 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.AspNetCore.Diagnostics;
 using Npgsql;
 
+// Docker/Render: avoid inotify exhaustion during config file watching (deploy preboot exit 139)
+Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "1");
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure logging early for better visibility

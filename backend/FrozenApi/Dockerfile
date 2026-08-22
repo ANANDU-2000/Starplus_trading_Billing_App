@@ -42,6 +42,7 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # Set environment variables
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV DOTNET_USE_POLLING_FILE_WATCHER=1
 # Don't override PORT - let Render set it via environment variable
 # ENV ASPNETCORE_URLS=http://+:80
 
