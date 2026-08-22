@@ -1,11 +1,19 @@
+const MOBILE_REVOKE_MS = 180_000
+const DESKTOP_REVOKE_MS = 120_000
+
+function blobRevokeDelay () {
+  return needsBlobPdfFlow() ? MOBILE_REVOKE_MS : DESKTOP_REVOKE_MS
+}
+
 /**
  * Programmatic download from a Blob. Revokes the object URL after a delay so the browser
  * can start the save (immediate revoke often cancels the download).
  */
-export function triggerBlobDownload (blob, filename, { revokeDelayMs = 60_000 } = {}) {
+export function triggerBlobDownload (blob, filename, { revokeDelayMs } = {}) {
   if (!blob || blob.size === 0) {
     throw new Error('Empty file')
   }
+  const delay = revokeDelayMs ?? blobRevokeDelay()
   const typed = blob.type === 'application/pdf'
     ? blob
     : new Blob([blob], { type: 'application/pdf' })
@@ -17,25 +25,26 @@ export function triggerBlobDownload (blob, filename, { revokeDelayMs = 60_000 } 
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), revokeDelayMs)
+  setTimeout(() => URL.revokeObjectURL(url), delay)
 }
 
 /**
  * Open PDF blob in a new tab (works on tablet/PWA when direct API URL fails).
  */
-export function openPdfBlobInViewer (blob, { revokeDelayMs = 120_000 } = {}) {
+export function openPdfBlobInViewer (blob, { revokeDelayMs } = {}) {
   if (!blob || blob.size === 0) return false
+  const delay = revokeDelayMs ?? blobRevokeDelay()
   const typed = blob.type === 'application/pdf'
     ? blob
     : new Blob([blob], { type: 'application/pdf' })
   const url = URL.createObjectURL(typed)
   const w = window.open(url, '_blank', 'noopener,noreferrer')
   if (w) {
-    setTimeout(() => URL.revokeObjectURL(url), revokeDelayMs)
+    setTimeout(() => URL.revokeObjectURL(url), delay)
     return 'new-tab'
   }
   window.location.assign(url)
-  setTimeout(() => URL.revokeObjectURL(url), revokeDelayMs)
+  setTimeout(() => URL.revokeObjectURL(url), delay)
   return 'same-tab'
 }
 
@@ -43,7 +52,7 @@ export function openPdfBlobInViewer (blob, { revokeDelayMs = 120_000 } = {}) {
  * iOS Safari (and some Android browsers) often ignore `download` on `<a>` for HTML blobs.
  * Opens the blob in a new tab so the user can Share → Save / Print to PDF.
  */
-export function tryOpenBlobInNewTab (blob, { revokeDelayMs = 120_000 } = {}) {
+export function tryOpenBlobInNewTab (blob, { revokeDelayMs } = {}) {
   if (!blob || blob.size === 0) return false
   const result = openPdfBlobInViewer(blob, { revokeDelayMs })
   return result === 'new-tab'
@@ -90,6 +99,101 @@ function toPdfBlob (blob) {
   return blob.type === 'application/pdf'
     ? blob
     : new Blob([blob], { type: 'application/pdf' })
+}
+
+/**
+ * Wait until an iframe has loaded its document (blob PDF viewer).
+ */
+export function waitForIframeReady (iframe, { timeoutMs = 8000 } = {}) {
+  return new Promise((resolve) => {
+    if (!iframe) {
+      resolve(false)
+      return
+    }
+
+    const done = () => {
+      setTimeout(() => resolve(true), 300)
+    }
+
+    try {
+      const doc = iframe.contentDocument
+      if (doc?.readyState === 'complete') {
+        done()
+        return
+      }
+    } catch {
+      /* cross-origin — rely on load event */
+    }
+
+    const onLoad = () => {
+      iframe.removeEventListener('load', onLoad)
+      done()
+    }
+    iframe.addEventListener('load', onLoad)
+
+    setTimeout(() => {
+      iframe.removeEventListener('load', onLoad)
+      resolve(false)
+    }, timeoutMs)
+  })
+}
+
+function tryPrintIframe (iframe) {
+  if (!iframe?.contentWindow) return false
+  try {
+    iframe.contentWindow.focus()
+    iframe.contentWindow.print()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Print via a hidden off-screen iframe (no popup / user-gesture required).
+ */
+function printViaHiddenIframe (blob) {
+  return new Promise((resolve) => {
+    const typed = toPdfBlob(blob)
+    const url = URL.createObjectURL(typed)
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = 'none'
+    iframe.setAttribute('aria-hidden', 'true')
+
+    let finished = false
+    const cleanup = () => {
+      setTimeout(() => {
+        iframe.remove()
+        URL.revokeObjectURL(url)
+      }, blobRevokeDelay())
+    }
+
+    const finish = (ok) => {
+      if (finished) return
+      finished = true
+      cleanup()
+      resolve(ok)
+    }
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        finish(tryPrintIframe(iframe))
+      }, 300)
+    }
+
+    iframe.onerror = () => finish(false)
+    document.body.appendChild(iframe)
+    iframe.src = url
+
+    setTimeout(() => {
+      if (!finished) finish(tryPrintIframe(iframe))
+    }, 5000)
+  })
 }
 
 /**
@@ -142,7 +246,21 @@ export async function shareOrSavePdfBlob (blob, filename) {
 
 /**
  * Print the real PDF (not the HTML app page).
- * Prefer the visible preview iframe; otherwise open PDF in a new tab and print there.
+ * Uses preview iframe when ready, else hidden iframe, else new tab on mobile.
+ */
+export async function printPdfBlobWhenReady (blob, previewIframe) {
+  if (!blob || blob.size === 0) return false
+
+  if (previewIframe) {
+    const ready = await waitForIframeReady(previewIframe)
+    if (ready && tryPrintIframe(previewIframe)) return true
+  }
+
+  return printPdfBlob(blob, { previewIframe: null })
+}
+
+/**
+ * Print the real PDF (not the HTML app page).
  */
 export function printPdfBlob (blob, { previewIframe = null } = {}) {
   return new Promise((resolve) => {
@@ -154,49 +272,75 @@ export function printPdfBlob (blob, { previewIframe = null } = {}) {
     const typed = toPdfBlob(blob)
     let printed = false
 
-    const tryPreviewIframe = () => {
-      if (!previewIframe?.contentWindow) return false
-      try {
-        previewIframe.contentWindow.focus()
-        previewIframe.contentWindow.print()
-        printed = true
-        resolve(true)
-        return true
-      } catch {
-        return false
-      }
+    const finish = (ok) => {
+      if (printed) return
+      printed = true
+      resolve(ok)
     }
 
-    if (tryPreviewIframe()) return
-
-    const url = URL.createObjectURL(typed)
-    const printWin = window.open(url, '_blank', 'noopener,noreferrer')
-
-    if (!printWin) {
-      URL.revokeObjectURL(url)
-      resolve(false)
+    if (previewIframe?.contentWindow) {
+      waitForIframeReady(previewIframe).then((ready) => {
+        if (ready && tryPrintIframe(previewIframe)) {
+          finish(true)
+          return
+        }
+        printViaHiddenIframe(typed).then((ok) => {
+          if (ok) {
+            finish(true)
+            return
+          }
+          if (needsBlobPdfFlow()) {
+            openPdfBlobInViewer(typed)
+            finish(true)
+            return
+          }
+          tryWindowPrint(typed, finish)
+        })
+      })
       return
     }
 
-    const runPrint = () => {
-      if (printed) return
-      try {
-        printWin.focus()
-        printWin.print()
-        printed = true
-        resolve(true)
-      } catch {
-        resolve(false)
+    printViaHiddenIframe(typed).then((ok) => {
+      if (ok) {
+        finish(true)
+        return
       }
-    }
-
-    printWin.addEventListener('load', () => {
-      setTimeout(runPrint, 600)
+      if (needsBlobPdfFlow()) {
+        openPdfBlobInViewer(typed)
+        finish(true)
+        return
+      }
+      tryWindowPrint(typed, finish)
     })
-
-    setTimeout(() => {
-      if (!printed) runPrint()
-      setTimeout(() => URL.revokeObjectURL(url), 120_000)
-    }, 2500)
   })
+}
+
+function tryWindowPrint (typed, finish) {
+  const url = URL.createObjectURL(typed)
+  const printWin = window.open(url, '_blank', 'noopener,noreferrer')
+
+  if (!printWin) {
+    URL.revokeObjectURL(url)
+    finish(false)
+    return
+  }
+
+  const runPrint = () => {
+    try {
+      printWin.focus()
+      printWin.print()
+      finish(true)
+    } catch {
+      finish(false)
+    }
+  }
+
+  printWin.addEventListener('load', () => {
+    setTimeout(runPrint, 600)
+  })
+
+  setTimeout(() => {
+    if (!printWin.closed) runPrint()
+    setTimeout(() => URL.revokeObjectURL(url), blobRevokeDelay())
+  }, 2500)
 }

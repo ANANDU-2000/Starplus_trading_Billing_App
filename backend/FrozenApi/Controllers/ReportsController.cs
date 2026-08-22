@@ -149,7 +149,9 @@ namespace FrozenApi.Controllers
                     InvoiceCount = 0
                 };
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
-                var pdfBytes = await pdfService.GenerateWorksheetPdfAsync(dto);
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await pdfService.GenerateWorksheetPdfAsync(dto),
+                    "Worksheet export");
                 var fileName = string.Equals(period, "custom", StringComparison.OrdinalIgnoreCase)
                     ? $"worksheet_{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.pdf"
                     : $"worksheet_{to:yyyy-MM}.pdf";
@@ -454,21 +456,52 @@ namespace FrozenApi.Controllers
 
         [HttpGet("export/pdf")]
         [Authorize(Roles = "Admin")]
-        public Task<ActionResult> ExportReportPdf(
+        public async Task<ActionResult> ExportReportPdf(
             [FromQuery] DateTime? fromDate = null,
             [FromQuery] DateTime? toDate = null)
         {
-            var from = fromDate ?? DateTime.Today.AddDays(-30);
-            var to = toDate ?? DateTime.Today;
-
-            // Generate PDF report using existing PdfService or create summary
-            // For now, return a simple response - can be enhanced with QuestPDF
-            return Task.FromResult<ActionResult>(Ok(new ApiResponse<object>
+            try
             {
-                Success = true,
-                Message = "PDF export endpoint ready. Implementation requires PDF generation library.",
-                Data = new { fromDate = from, toDate = to, message = "Use GET /api/reports/summary for data" }
-            }));
+                var from = (fromDate ?? DateTime.Today.AddDays(-30)).Date;
+                var to = (toDate ?? DateTime.Today).Date;
+
+                var pendingBills = await _reportService.GetPendingBillsAsync(from, to, null, null, null);
+
+                if (pendingBills == null || !pendingBills.Any())
+                {
+                    return NotFound(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "No report data found for the specified period"
+                    });
+                }
+
+                var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await pdfService.GeneratePendingBillsPdfAsync(pendingBills, from, to),
+                    "Report export");
+
+                var fileName = $"report_{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.pdf";
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error exporting report PDF: {ex.Message}");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred while exporting the report",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
         }
 
         [HttpGet("export/excel")]
@@ -741,7 +774,9 @@ namespace FrozenApi.Controllers
                 }
                 
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
-                var pdfBytes = await pdfService.GenerateSalesLedgerPdfAsync(ledgerReport, from, to);
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await pdfService.GenerateSalesLedgerPdfAsync(ledgerReport, from, to),
+                    "Sales ledger export");
                 
                 var fileName = !string.IsNullOrWhiteSpace(type)
                     ? $"sales_ledger_{type.ToLower()}_{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.pdf"
@@ -786,7 +821,9 @@ namespace FrozenApi.Controllers
                 }
                 
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
-                var pdfBytes = await pdfService.GeneratePendingBillsPdfAsync(pendingBills, from, to);
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await pdfService.GeneratePendingBillsPdfAsync(pendingBills, from, to),
+                    "Pending bills export");
                 
                 var fileName = $"pending_bills_{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.pdf";
                 

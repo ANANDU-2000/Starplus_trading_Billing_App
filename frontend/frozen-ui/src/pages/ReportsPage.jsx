@@ -18,7 +18,7 @@ import toast from 'react-hot-toast'
 import { LoadingCard } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import { reportsAPI, productsAPI, customersAPI, profitAPI, paymentsAPI } from '../services'
-import { triggerBlobDownload } from '../utils/blobDownload'
+import { saveValidatedPdfBlob } from '../utils/invoicePdfActions'
 import { validatePdfBlob } from '../utils/pdfBlob'
 import { 
   LineChart, 
@@ -777,16 +777,17 @@ const ReportsPage = () => {
   const handleExport = async (format) => {
     try {
       toast.loading(`Exporting ${format.toUpperCase()} report...`)
-      const blob = await reportsAPI.exportReportPdf({ fromDate: dateRange.from, toDate: dateRange.to, format })
+      const blob = activeTab === 'outstanding'
+        ? await reportsAPI.exportPendingBillsPdf({ fromDate: dateRange.from, toDate: dateRange.to })
+        : await reportsAPI.exportPendingBillsPdf({ fromDate: dateRange.from, toDate: dateRange.to })
       const check = await validatePdfBlob(blob)
       if (!check.ok) {
         toast.dismiss()
         toast.error(check.message)
         return
       }
-      triggerBlobDownload(check.blob, `report_${dateRange.from}_${dateRange.to}.pdf`)
+      await saveValidatedPdfBlob(check.blob, `report_${dateRange.from}_${dateRange.to}.pdf`)
       toast.dismiss()
-      toast.success('Download started — check your downloads folder')
     } catch (error) {
       console.error('Failed to export report:', error)
       toast.dismiss()
@@ -1633,9 +1634,8 @@ const ReportsPage = () => {
                           toast.error(check.message)
                           return
                         }
-                        triggerBlobDownload(check.blob, `pending_bills_${dateRange.from}_${dateRange.to}.pdf`)
+                        await saveValidatedPdfBlob(check.blob, `pending_bills_${dateRange.from}_${dateRange.to}.pdf`)
                         toast.dismiss()
-                        toast.success('Download started — check your downloads folder')
                       } catch (error) {
                         console.error('Failed to export PDF:', error)
                         toast.dismiss()

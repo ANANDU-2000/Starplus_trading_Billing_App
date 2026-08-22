@@ -32,7 +32,7 @@ import {
   loadCachedInvoicePdfUrl
 } from '../utils/invoicePdfActions'
 import { clearCachedInvoicePdf } from '../utils/pdfBlobCache'
-import { savePdfToDevice, printPdfBlob } from '../utils/blobDownload'
+import { savePdfToDevice, printPdfBlobWhenReady } from '../utils/blobDownload'
 import { computeInvoiceTotals, computeAutoRoundOffFromCalc } from '../utils/invoiceTotals'
 
 const PosPage = () => {
@@ -61,6 +61,7 @@ const PosPage = () => {
   const [posPdfLoading, setPosPdfLoading] = useState(false)
   const [posPdfError, setPosPdfError] = useState(null)
   const [posPdfReady, setPosPdfReady] = useState(false)
+  const [posPdfIframeReady, setPosPdfIframeReady] = useState(false)
   const posPdfPreviewRef = useRef(null)
   const posPdfUrlRef = useRef(null)
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('0001')
@@ -520,6 +521,7 @@ const PosPage = () => {
     }
     setPosPdfPreviewUrl(null)
     setPosPdfReady(false)
+    setPosPdfIframeReady(false)
     setPosPdfError(null)
   }, [])
 
@@ -528,6 +530,7 @@ const PosPage = () => {
     setPosPdfLoading(true)
     setPosPdfError(null)
     setPosPdfReady(false)
+    setPosPdfIframeReady(false)
     revokePosPdfPreview()
     try {
       const result = await prefetchInvoicePdf(saleId)
@@ -539,7 +542,6 @@ const PosPage = () => {
       const url = await loadCachedInvoicePdfUrl(saleId)
       posPdfUrlRef.current = url
       setPosPdfPreviewUrl(url)
-      setPosPdfReady(true)
     } catch (err) {
       const msg = err?.message || 'Failed to load invoice PDF'
       setPosPdfError(msg)
@@ -563,7 +565,8 @@ const PosPage = () => {
       toast.error('No invoice available.')
       return
     }
-    if (!posPdfReady) {
+    const cached = getCachedInvoicePdf(lastCreatedInvoice.id)
+    if (!cached && posPdfLoading) {
       toast.error(posPdfError || 'Invoice PDF is still loading. Please wait.')
       return
     }
@@ -577,7 +580,7 @@ const PosPage = () => {
 
   const handlePrintInvoicePdf = async () => {
     if (!lastCreatedInvoice?.id) return
-    if (!posPdfReady) {
+    if (!posPdfReady || !posPdfIframeReady) {
       toast.error(posPdfError || 'PDF not loaded yet')
       return
     }
@@ -586,7 +589,7 @@ const PosPage = () => {
       runPosPdfAction(openInvoicePdfForPrint)
       return
     }
-    const ok = await printPdfBlob(blob, { previewIframe: posPdfPreviewRef.current })
+    const ok = await printPdfBlobWhenReady(blob, posPdfPreviewRef.current)
     if (ok) {
       toast.success('Print dialog opened — print the tax invoice PDF shown above')
     } else {
@@ -2176,10 +2179,14 @@ const PosPage = () => {
                   ref={posPdfPreviewRef}
                   title="Invoice PDF"
                   src={posPdfPreviewUrl}
+                  onLoad={() => {
+                    setPosPdfIframeReady(true)
+                    setPosPdfReady(true)
+                  }}
                   className="w-full h-[40vh] min-h-[220px] border rounded bg-white"
                 />
               )}
-              {posPdfReady && (
+              {posPdfReady && posPdfIframeReady && (
                 <p className="text-xs text-green-700 font-medium">
                   PDF loaded — this is the real invoice. Use buttons below (not browser Print).
                 </p>
@@ -2199,7 +2206,7 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handlePrintInvoicePdf}
-                  disabled={!posPdfReady || posPdfLoading}
+                  disabled={!posPdfReady || !posPdfIframeReady || posPdfLoading}
                   className="w-full flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
                 >
                   <Printer className="h-5 w-5 mr-2" />
@@ -2209,7 +2216,7 @@ const PosPage = () => {
                 <button
                   type="button"
                   onClick={handleSaveInvoicePdf}
-                  disabled={!posPdfReady || posPdfLoading}
+                  disabled={!posPdfReady || !posPdfIframeReady || posPdfLoading}
                   className="w-full flex items-center justify-center px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors shadow-md disabled:opacity-50"
                 >
                   <Download className="h-5 w-5 mr-2" />

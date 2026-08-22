@@ -4,7 +4,7 @@ import { formatCurrency } from '../utils/currency'
 import toast from 'react-hot-toast'
 import { LoadingCard } from '../components/Loading'
 import { reportsAPI } from '../services'
-import { triggerBlobDownload } from '../utils/blobDownload'
+import { saveValidatedPdfBlob } from '../utils/invoicePdfActions'
 import { validatePdfBlob } from '../utils/pdfBlob'
 
 const PERIODS = [
@@ -90,9 +90,8 @@ const WorksheetPage = () => {
         return
       }
       const label = data?.periodLabel ?? data?.PeriodLabel ?? 'worksheet'
-      triggerBlobDownload(check.blob, `worksheet_${String(label).replace(/\s/g, '_')}.pdf`)
+      await saveValidatedPdfBlob(check.blob, `worksheet_${String(label).replace(/\s/g, '_')}.pdf`)
       toast.dismiss()
-      toast.success('Download started — check your downloads folder')
     } catch (err) {
       toast.dismiss()
       toast.error(err?.response?.data?.message || 'Failed to export PDF')

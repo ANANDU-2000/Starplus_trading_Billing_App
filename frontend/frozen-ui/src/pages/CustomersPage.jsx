@@ -27,7 +27,7 @@ import Modal from '../components/Modal'
 import { customersAPI } from '../services'
 import { TabNavigation } from '../components/ui'
 import toast from 'react-hot-toast'
-import { triggerBlobDownload } from '../utils/blobDownload'
+import { saveValidatedPdfBlob } from '../utils/invoicePdfActions'
 import { validatePdfBlob } from '../utils/pdfBlob'
 
 const CustomersPage = () => {
@@ -300,9 +300,8 @@ const CustomersPage = () => {
         toast.error(check.message)
         return
       }
-      triggerBlobDownload(check.blob, `customer_statement_${selectedCustomer.id}_${Date.now()}.pdf`)
+      await saveValidatedPdfBlob(check.blob, `customer_statement_${selectedCustomer.id}_${Date.now()}.pdf`)
       toast.dismiss()
-      toast.success('Download started — check your downloads folder')
     } catch (error) {
       console.error('Failed to export statement:', error)
       toast.dismiss()

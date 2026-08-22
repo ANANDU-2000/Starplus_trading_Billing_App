@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using FrozenApi.Services;
 using FrozenApi.Models;
+using FrozenApi.Helpers;
 
 namespace FrozenApi.Controllers
 {
@@ -241,16 +242,9 @@ namespace FrozenApi.Controllers
                 }
 
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
-                var pdfBytes = await pdfService.GenerateCombinedInvoicePdfAsync(sales);
-                
-                if (pdfBytes == null || pdfBytes.Length == 0)
-                {
-                    return StatusCode(500, new ApiResponse<object>
-                    {
-                        Success = false,
-                        Message = "Failed to generate combined PDF. PDF bytes are empty."
-                    });
-                }
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await pdfService.GenerateCombinedInvoicePdfAsync(sales),
+                    "Combined invoice PDF");
                 
                 var filename = $"Combined_Invoices_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
                 
@@ -297,21 +291,15 @@ namespace FrozenApi.Controllers
                 }
 
                 Console.WriteLine($"✅ PDF Request: Invoice {id} found, generating PDF...");
-                var pdfBytes = await _saleService.GenerateInvoicePdfAsync(id);
-                
-                if (pdfBytes == null || pdfBytes.Length == 0)
-                {
-                    Console.WriteLine($"❌ PDF Request: PDF bytes are empty for invoice {id}");
-                    return StatusCode(500, new ApiResponse<object>
-                    {
-                        Success = false,
-                        Message = "Failed to generate PDF. PDF bytes are empty."
-                    });
-                }
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await _saleService.GenerateInvoicePdfAsync(id),
+                    "Invoice PDF");
                 
                 Console.WriteLine($"✅ PDF Request: Successfully generated {pdfBytes.Length} bytes for invoice {id}");
                 
-                var filename = sale != null ? $"INV-{sale.InvoiceNo}.pdf" : $"invoice_{id}.pdf";
+                var filename = sale != null
+                    ? $"INV-{PdfBytesHelper.SanitizeFilename(sale.InvoiceNo, id.ToString())}.pdf"
+                    : $"invoice_{id}.pdf";
                 
                 // Inline mode for print/open-in-tab flows used by web + tablet PWA.
                 var wantsInline = Request.Query.ContainsKey("print")

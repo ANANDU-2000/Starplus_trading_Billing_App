@@ -406,7 +406,9 @@ namespace FrozenApi.Controllers
                 var from = NormalizeDateOnly(fromDate, DateTime.UtcNow.AddDays(-30).Date);
                 var to = NormalizeDateOnly(toDate, DateTime.UtcNow.Date);
                 
-                var pdfBytes = await _customerService.GenerateCustomerStatementAsync(id, from, to);
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await _customerService.GenerateCustomerStatementAsync(id, from, to),
+                    "Customer statement");
                 var filename = $"customer_statement_{id}_{DateTime.UtcNow:yyyyMMdd}.pdf";
                 var wantsInline = Request.Query.ContainsKey("print")
                     || Request.Query.ContainsKey("open")
@@ -481,9 +483,12 @@ namespace FrozenApi.Controllers
                 }
                 
                 var pdfService = HttpContext.RequestServices.GetRequiredService<IPdfService>();
-                var pdfBytes = await pdfService.GenerateCustomerPendingBillsPdfAsync(filteredInvoices, customer, DateTime.UtcNow, from, to);
+                var pdfBytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await pdfService.GenerateCustomerPendingBillsPdfAsync(filteredInvoices, customer, DateTime.UtcNow, from, to),
+                    "Customer pending bills");
 
-                var filename = $"pending_bills_{customer.Name}_{from:yyyy-MM-dd}_to_{to:yyyy-MM-dd}.pdf";
+                var safeName = PdfBytesHelper.SanitizeFilename(customer.Name, $"customer_{id}");
+                var filename = $"pending_bills_{safeName}_{from:yyyy-MM-dd}_to_{to:yyyy-MM-dd}.pdf";
                 var wantsInline = Request.Query.ContainsKey("print")
                     || Request.Query.ContainsKey("open")
                     || Request.Headers["Accept"].ToString().Contains("application/pdf", StringComparison.OrdinalIgnoreCase);

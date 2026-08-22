@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import { LoadingCard } from '../components/Loading'
 import { Input, Select } from '../components/Form'
 import { reportsAPI } from '../services'
-import { triggerBlobDownload } from '../utils/blobDownload'
+import { saveValidatedPdfBlob } from '../utils/invoicePdfActions'
 import { validatePdfBlob } from '../utils/pdfBlob'
 
 // Period presets: Today, This Week, This Month, Custom
@@ -302,9 +302,8 @@ const SalesLedgerPage = () => {
         const fileName = filters.type
           ? `sales_ledger_${filters.type.toLowerCase()}_${dateRange.from}_${dateRange.to}.pdf`
           : `sales_ledger_${dateRange.from}_${dateRange.to}.pdf`
-        triggerBlobDownload(check.blob, fileName)
+        await saveValidatedPdfBlob(check.blob, fileName)
         toast.dismiss()
-        toast.success('Download started — check your downloads folder')
       } else {
         const errorData = await response.json().catch(() => ({}))
         throw new Error(errorData.message || 'Failed to export PDF')

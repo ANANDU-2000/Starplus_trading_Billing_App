@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using FrozenApi.Services;
 using FrozenApi.Models;
+using FrozenApi.Helpers;
 
 namespace FrozenApi.Controllers
 {
@@ -483,13 +484,13 @@ namespace FrozenApi.Controllers
                 if (dto == null)
                     return NotFound(new ApiResponse<object> { Success = false, Message = "Receipt not found." });
 
-                var bytes = await _receiptService.GetReceiptPdfAsync(receiptId);
-                if (bytes == null || bytes.Length == 0)
-                    return StatusCode(500, new ApiResponse<object> { Success = false, Message = "Receipt not found or could not be generated." });
+                var bytes = PdfBytesHelper.EnsureValidPdfBytes(
+                    await _receiptService.GetReceiptPdfAsync(receiptId),
+                    "Receipt PDF");
 
-                var safeNumber = string.IsNullOrWhiteSpace(dto.ReceiptNumber)
-                    ? receiptId.ToString()
-                    : dto.ReceiptNumber.Replace("\"", "'");
+                var safeNumber = PdfBytesHelper.SanitizeFilename(
+                    string.IsNullOrWhiteSpace(dto.ReceiptNumber) ? receiptId.ToString() : dto.ReceiptNumber,
+                    receiptId.ToString());
                 var filename = $"Receipt-{safeNumber}.pdf";
 
                 var wantsInline = Request.Query.ContainsKey("print")
