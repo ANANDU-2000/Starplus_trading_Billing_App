@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Printer, CheckCircle, XCircle, Loader2 } from '
 import { salesAPI } from '../services'
 import { validatePdfBlob } from '../utils/pdfBlob'
 import { getHealthUrl, getInvoicePdfUrl } from '../utils/pdfUrls'
-import { openPdfDirectUrl, needsBlobPdfFlow } from '../utils/blobDownload'
+import { openPdfDirectUrl, needsBlobPdfFlow, printPdfDirectUrl } from '../utils/blobDownload'
 import { useAppUpdate } from '../hooks/useAppUpdate'
 import { isHonorOrAndroid } from '../utils/pdfHints'
 
@@ -84,10 +84,13 @@ export default function PdfPrintTester ({ adminOnly = false, user }) {
 
         if (check.ok) {
           const url = getInvoicePdfUrl(saleId, { print: true })
-          out.directUrl.ok = openPdfDirectUrl(url)
-          out.directUrl.detail = out.directUrl.ok
-            ? 'Opened server PDF URL in new tab'
-            : 'Popup blocked — allow popups for this site'
+          const printResult = await printPdfDirectUrl(url)
+          out.directUrl.ok = printResult.ok
+          out.directUrl.detail = printResult.method === 'dialog'
+            ? 'Print dialog triggered for server PDF'
+            : printResult.method === 'tab'
+              ? 'PDF opened in tab — use ⋮ → Print if dialog did not appear'
+              : 'Could not print — allow popups for this site'
         }
       }
     } catch (err) {

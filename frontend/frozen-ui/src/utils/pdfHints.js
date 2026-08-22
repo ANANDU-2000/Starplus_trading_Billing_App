@@ -9,10 +9,10 @@ export function isHonorOrAndroid () {
 
 export function getPrintHintText () {
   if (isHonorOrAndroid()) {
-    return 'PDF opened in Chrome — tap ⋮ → Share → Print (or Open with → Chrome PDF Viewer)'
+    return 'If print did not start, tap ⋮ in the PDF tab → Print'
   }
   if (isLikelyMobileBrowser()) {
-    return 'PDF opened — tap ⋮ → Print in the PDF tab'
+    return 'If print did not start, tap ⋮ → Print in the PDF tab'
   }
   return 'Print dialog opened — print the PDF, not this app screen'
 }

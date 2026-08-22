@@ -2,6 +2,7 @@ import {
   needsBlobPdfFlow,
   savePdfToDevice,
   printPdfBlob,
+  printPdfDirectUrl,
   openPdfDirectUrl
 } from './blobDownload'
 import { getPrintResultToast, markPrintHintSeen } from './pdfHints'
@@ -14,31 +15,30 @@ function toPdfBlob (blob) {
 }
 
 /**
- * Mobile/tablet print: Share sheet (print apps) → direct server URL → desktop print fallback.
+ * Mobile/tablet print: direct server URL print dialog → blob iframe print → open tab fallback.
+ * Never uses Share sheet for Print PDF.
  */
 export async function mobilePrintPdf ({ blob, filename, directUrl }) {
-  const typed = toPdfBlob(blob)
+  if (directUrl) {
+    const result = await printPdfDirectUrl(directUrl)
+    if (result.ok) {
+      markPrintHintSeen()
+      return result
+    }
+  }
 
-  if (typed && filename) {
-    const file = new File([typed], filename, { type: 'application/pdf' })
-    if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: filename })
-        markPrintHintSeen()
-        return { ok: true, method: 'share' }
-      } catch (err) {
-        if (err?.name === 'AbortError') return { ok: true, method: 'cancelled' }
-      }
+  const typed = toPdfBlob(blob)
+  if (typed) {
+    const blobResult = await printPdfBlob(typed)
+    if (blobResult.ok) {
+      markPrintHintSeen()
+      return blobResult
     }
   }
 
   if (directUrl && openPdfDirectUrl(directUrl)) {
     markPrintHintSeen()
     return { ok: true, method: 'tab' }
-  }
-
-  if (typed && !needsBlobPdfFlow()) {
-    return printPdfBlob(typed)
   }
 
   return { ok: false, method: 'failed' }
@@ -52,7 +52,7 @@ export function mobileViewPdf ({ directUrl }) {
 export async function mobileDownloadPdf ({ blob, filename, directUrl }) {
   const typed = toPdfBlob(blob)
   if (typed) {
-    const result = await savePdfToDevice(typed, filename)
+    const result = await savePdfToDevice(typed, filename, { directUrl })
     if (result !== 'tab' || !directUrl) return result
   }
   if (directUrl && openPdfDirectUrl(directUrl)) return 'tab'

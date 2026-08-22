@@ -103,7 +103,7 @@ export default function PdfDocumentModal () {
     if (!blob) return
     setSaving(true)
     try {
-      const result = await savePdfToDevice(blob, filename)
+      const result = await savePdfToDevice(blob, filename, { directUrl })
       if (result === 'cancelled') return
       if (result === 'picker' || result === 'share') {
         toast.success('PDF saved — check your Downloads or Files folder')

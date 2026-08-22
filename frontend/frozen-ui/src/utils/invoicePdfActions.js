@@ -5,6 +5,7 @@ import {
   isStandalonePwaMode as checkStandalonePwa,
   savePdfToDevice,
   printPdfBlob,
+  printPdfDirectUrl,
   needsBlobPdfFlow
 } from './blobDownload'
 import {
@@ -104,8 +105,18 @@ async function runPdfAction ({
     return openPdfDocument({ title, filename, fetchPdf, mode: 'view', directUrl })
   }
 
-  const toastId = toast.loading('Preparing PDF…')
+  const toastId = toast.loading(action === 'print' ? 'Opening print…' : 'Preparing PDF…')
   try {
+    // Fast path: print server PDF URL immediately (keeps user gesture for print dialog)
+    if (action === 'print' && isMobile && directUrl) {
+      const fast = await printPdfDirectUrl(directUrl)
+      if (fast.ok && fast.method === 'dialog') {
+        toast.dismiss(toastId)
+        toastPrintResult(fast, toast)
+        return true
+      }
+    }
+
     const typed = await fetchAndValidate(fetchPdf)
 
     if (action === 'print') {
@@ -134,7 +145,7 @@ async function runPdfAction ({
     }
 
     if (action === 'download') {
-      const result = await savePdfToDevice(typed, filename)
+      const result = await savePdfToDevice(typed, filename, { directUrl })
       toast.dismiss(toastId)
       if (result === 'cancelled') return true
       if (result === 'picker' || result === 'share') {

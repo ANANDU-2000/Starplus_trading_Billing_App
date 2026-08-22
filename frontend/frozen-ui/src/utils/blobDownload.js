@@ -29,6 +29,113 @@ export function triggerBlobDownload (blob, filename, { revokeDelayMs } = {}) {
 }
 
 /**
+ * Print via hidden iframe loading a server PDF URL (works on many Android tablets).
+ */
+function printViaHiddenIframeUrl (url) {
+  return new Promise((resolve) => {
+    if (!url) {
+      resolve(false)
+      return
+    }
+
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = 'none'
+    iframe.setAttribute('aria-hidden', 'true')
+
+    let finished = false
+    const cleanup = () => {
+      setTimeout(() => iframe.remove(), 60_000)
+    }
+
+    const finish = (ok) => {
+      if (finished) return
+      finished = true
+      cleanup()
+      resolve(ok)
+    }
+
+    iframe.onload = () => {
+      setTimeout(() => finish(tryPrintIframe(iframe)), 500)
+    }
+    iframe.onerror = () => finish(false)
+    document.body.appendChild(iframe)
+    iframe.src = url
+
+    setTimeout(() => {
+      if (!finished) finish(tryPrintIframe(iframe))
+    }, 6000)
+  })
+}
+
+/**
+ * Open server PDF URL in new tab and trigger print (must not use noopener — need window ref).
+ */
+function tryWindowPrintUrl (url) {
+  return new Promise((resolve) => {
+    if (!url) {
+      resolve(false)
+      return
+    }
+
+    let printWin
+    try {
+      printWin = window.open(url, '_blank')
+    } catch {
+      resolve(false)
+      return
+    }
+
+    if (!printWin) {
+      resolve(false)
+      return
+    }
+
+    let finished = false
+    const finish = (ok) => {
+      if (finished) return
+      finished = true
+      resolve(ok)
+    }
+
+    const runPrint = () => {
+      try {
+        printWin.focus()
+        printWin.print()
+        finish(true)
+      } catch {
+        if (!finished) finish(false)
+      }
+    }
+
+    setTimeout(runPrint, 1200)
+    setTimeout(runPrint, 2800)
+  })
+}
+
+/**
+ * Print a server-generated PDF URL directly — primary path for tablet/mobile.
+ * @returns {Promise<{ ok: boolean, method: 'dialog'|'tab'|'failed' }>}
+ */
+export async function printPdfDirectUrl (url) {
+  if (!url) return { ok: false, method: 'failed' }
+
+  const iframeOk = await printViaHiddenIframeUrl(url)
+  if (iframeOk) return { ok: true, method: 'dialog' }
+
+  const winOk = await tryWindowPrintUrl(url)
+  if (winOk) return { ok: true, method: 'dialog' }
+
+  // Last resort: open tab so user can print from Chrome PDF viewer
+  const opened = openPdfDirectUrl(url)
+  return opened ? { ok: true, method: 'tab' } : { ok: false, method: 'failed' }
+}
+
+/**
  * Open a direct HTTPS PDF URL (server-generated). Works reliably on Android Chrome.
  */
 export function openPdfDirectUrl (url) {
@@ -212,10 +319,10 @@ function printViaHiddenIframe (blob) {
 }
 
 /**
- * Save PDF on Honor/Android/PWA: Share → File picker → open tab fallback.
+ * Save PDF on tablet: direct download / open URL first; Share only as last resort.
  * @returns {'share'|'picker'|'tab'|'download'|'cancelled'}
  */
-export async function savePdfToDevice (blob, filename) {
+export async function savePdfToDevice (blob, filename, { directUrl } = {}) {
   const typed = toPdfBlob(blob)
   const file = new File([typed], filename, { type: 'application/pdf' })
 
@@ -237,6 +344,22 @@ export async function savePdfToDevice (blob, filename) {
     }
   }
 
+  if (!needsBlobPdfFlow()) {
+    triggerBlobDownload(typed, filename)
+    return 'download'
+  }
+
+  if (directUrl && openPdfDirectUrl(directUrl)) {
+    return 'tab'
+  }
+
+  try {
+    triggerBlobDownload(typed, filename)
+    return 'download'
+  } catch {
+    /* fall through */
+  }
+
   if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: filename })
@@ -246,13 +369,8 @@ export async function savePdfToDevice (blob, filename) {
     }
   }
 
-  if (needsBlobPdfFlow()) {
-    openPdfBlobInViewer(typed)
-    return 'tab'
-  }
-
-  triggerBlobDownload(typed, filename)
-  return 'download'
+  openPdfBlobInViewer(typed)
+  return 'tab'
 }
 
 export async function shareOrSavePdfBlob (blob, filename) {
@@ -260,12 +378,14 @@ export async function shareOrSavePdfBlob (blob, filename) {
 }
 
 /** @returns {Promise<{ ok: boolean, method: 'dialog'|'tab'|'failed'|'cancelled' }>} */
-export async function printPdfBlobWhenReady (blob, previewIframe) {
-  if (!blob || blob.size === 0) return { ok: false, method: 'failed' }
-
+export async function printPdfBlobWhenReady (blob, previewIframe, directUrl = null) {
   if (needsBlobPdfFlow()) {
+    if (directUrl) return printPdfDirectUrl(directUrl)
+    if (blob?.size) return printPdfBlob(blob, { previewIframe: null })
     return { ok: false, method: 'failed' }
   }
+
+  if (!blob || blob.size === 0) return { ok: false, method: 'failed' }
 
   if (previewIframe) {
     const ready = await waitForIframeReady(previewIframe)
@@ -326,7 +446,14 @@ export function printPdfBlob (blob, { previewIframe = null } = {}) {
 
 function tryWindowPrint (typed, finish) {
   const url = URL.createObjectURL(typed)
-  const printWin = window.open(url, '_blank', 'noopener,noreferrer')
+  let printWin
+  try {
+    printWin = window.open(url, '_blank')
+  } catch {
+    URL.revokeObjectURL(url)
+    finish(false)
+    return
+  }
 
   if (!printWin) {
     URL.revokeObjectURL(url)
@@ -344,12 +471,9 @@ function tryWindowPrint (typed, finish) {
     }
   }
 
-  printWin.addEventListener('load', () => {
-    setTimeout(runPrint, 600)
-  })
-
+  setTimeout(runPrint, 1200)
   setTimeout(() => {
     if (!printWin.closed) runPrint()
     setTimeout(() => URL.revokeObjectURL(url), blobRevokeDelay())
-  }, 2500)
+  }, 2800)
 }
