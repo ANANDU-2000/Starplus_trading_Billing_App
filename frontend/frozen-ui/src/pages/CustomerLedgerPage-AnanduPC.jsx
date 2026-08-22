@@ -242,7 +242,7 @@ const CustomerLedgerPage = () => {
     if (customerIdParam) {
       const customerId = parseInt(customerIdParam)
       if (!isNaN(customerId)) {
-        const customer = customers.find(c => c.id === customerId)
+        const customer = customers.find(c => c.id == customerId)
         if (customer) {
           setSelectedCustomer(customer)
         } else if (customers.length > 0) {
@@ -250,8 +250,13 @@ const CustomerLedgerPage = () => {
           customersAPI.getCustomer(customerId).then(response => {
             if (response?.success && response?.data) {
               setSelectedCustomer(response.data)
+            } else {
+              setSearchParams({}, { replace: true })
             }
-          }).catch(err => console.error('Failed to load customer from URL:', err))
+          }).catch(err => {
+            console.error('Failed to load customer from URL:', err)
+            setSearchParams({}, { replace: true })
+          })
         }
       }
     }
@@ -266,7 +271,7 @@ const CustomerLedgerPage = () => {
       setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
       return
     }
-    const customer = customers.find(c => c.id === saved.customerId)
+    const customer = customers.find(c => c.id == saved.customerId)
     if (customer) {
       setSelectedCustomer(customer)
     }
@@ -367,7 +372,7 @@ const CustomerLedgerPage = () => {
   }
 
   const filterCustomers = () => {
-    let filtered = customers
+    let filtered = customers.filter(Boolean)
     if (searchTerm) {
       const term = searchTerm.toLowerCase()
       filtered = filtered.filter(c => 
@@ -875,6 +880,7 @@ const CustomerLedgerPage = () => {
   }
 
   const handleSelectCustomer = (customer) => {
+    if (!customer || customer.id == null) return
     setCustomerLedger([])
     setCustomerInvoices([])
     setCustomerPayments([])
@@ -1508,7 +1514,8 @@ const CustomerLedgerPage = () => {
 
         {/* MAIN LEDGER VIEW */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {!selectedCustomer && !searchTerm && !searchFocused ? (
+          {!selectedCustomer ? (
+            !searchTerm && !searchFocused ? (
             <div className="flex-1 flex items-center justify-center py-8 min-h-0">
               <div className="text-center max-w-sm">
                 <Users className="h-12 w-12 mx-auto mb-3 text-gray-400" />
@@ -1516,6 +1523,7 @@ const CustomerLedgerPage = () => {
                 <p className="text-xs text-gray-500 mt-1">Use the search bar above (Press F2 to focus)</p>
               </div>
             </div>
+            ) : null
           ) : (
             <>
               {/* Compact Customer Info & Summary Bar */}
