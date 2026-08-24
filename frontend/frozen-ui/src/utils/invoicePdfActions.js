@@ -23,6 +23,22 @@ import { getCachedInvoicePdf, setCachedInvoicePdf } from './pdfBlobCache'
 const recentOpenByKey = new Map()
 const DEBOUNCE_MS = 400
 
+/** Normalize to YYYY-MM-DD for API date filters. */
+function toDateOnly (value) {
+  if (!value) return ''
+  if (typeof value === 'string') {
+    const m = value.match(/^(\d{4}-\d{2}-\d{2})/)
+    if (m) return m[1]
+    const d = new Date(value)
+    if (!Number.isNaN(d.getTime())) return d.toISOString().split('T')[0]
+    return value
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0]
+  }
+  return String(value)
+}
+
 function safeInvoiceName (saleId, invoiceNo) {
   return `INV-${String(invoiceNo || saleId || 'invoice').replace(/[^\w.-]+/g, '_')}.pdf`
 }
@@ -74,8 +90,8 @@ async function fetchAndValidate (fetchPdf) {
 }
 
 /**
- * Instant print — one tap, no fetch, no modal, no loading spinner.
- * Opens server PDF and triggers print dialog immediately.
+ * Instant print — anonymous endpoints only (invoice / receipt AllowAnonymous).
+ * Opens server PDF URL and triggers print immediately.
  */
 function runInstantPrint ({ getDirectUrl, fetchPdf, filename }) {
   const directUrl = getDirectUrl?.({ print: true })
@@ -92,7 +108,6 @@ function runInstantPrint ({ getDirectUrl, fetchPdf, filename }) {
       return
     }
 
-    // Rare fallback: validate blob then print
     try {
       const typed = await fetchAndValidate(fetchPdf)
       const blobResult = await printPdfBlob(typed)
@@ -111,6 +126,49 @@ function runInstantPrint ({ getDirectUrl, fetchPdf, filename }) {
   return true
 }
 
+/**
+ * Authenticated print — statement / pending bills / any [Authorize] PDF.
+ * Never window.open(apiUrl) without working auth: fetch with Bearer, then print blob.
+ * Fallback: withAuth direct URL (JwtBearer OnMessageReceived) if blob print fails.
+ */
+function runAuthenticatedPrint ({ fetchPdf, filename, debounceKey, getDirectUrl }) {
+  if (debounceKey && shouldDebounce(debounceKey)) {
+    toast('Opening print…', { duration: 1500 })
+    return false
+  }
+  if (debounceKey) markDebounce(debounceKey)
+
+  const toastId = toast.loading('Opening print…')
+  void (async () => {
+    try {
+      const typed = await fetchAndValidate(fetchPdf)
+      const result = await printPdfBlob(typed)
+      if (result.ok) {
+        toast.dismiss(toastId)
+        toastPrintResult(result, toast)
+        return
+      }
+      const directUrl = getDirectUrl?.({ print: true })
+      if (directUrl) {
+        const fallback = await instantPrintPdfUrl(directUrl)
+        toast.dismiss(toastId)
+        if (fallback.ok) {
+          toastPrintResult(fallback, toast)
+          return
+        }
+      }
+      toast.dismiss(toastId)
+      toast.error('Print failed — allow popups for this site')
+    } catch (err) {
+      toast.dismiss(toastId)
+      const msg = await parseApiErrorBlobMessage(err, 'Print failed — login again if session expired')
+      toast.error(msg)
+    }
+  })()
+
+  return true
+}
+
 async function runPdfAction ({
   title,
   filename,
@@ -118,9 +176,14 @@ async function runPdfAction ({
   action,
   debounceKey,
   getDirectUrl,
-  openModalOnFailure = true
+  openModalOnFailure = true,
+  /** When true, print/view must use axios Bearer (never raw API tab without auth). */
+  requiresAuth = false
 }) {
   if (action === 'print') {
+    if (requiresAuth) {
+      return runAuthenticatedPrint({ fetchPdf, filename, debounceKey })
+    }
     if (debounceKey && shouldDebounce(debounceKey)) {
       toast('Opening print…', { duration: 1500 })
       return false
@@ -139,6 +202,13 @@ async function runPdfAction ({
   const isMobile = needsBlobPdfFlow()
 
   if (action === 'view') {
+    // Auth-required PDFs: open withAuth URL (works after JwtBearer query token) or modal
+    if (requiresAuth) {
+      if (directUrl && openPdfDirectUrl(directUrl)) {
+        return true
+      }
+      return openPdfDocument({ title, filename, fetchPdf, mode: 'view', directUrl })
+    }
     if (directUrl && openPdfDirectUrl(directUrl)) {
       return true
     }
@@ -153,7 +223,7 @@ async function runPdfAction ({
     const typed = await fetchAndValidate(fetchPdf)
 
     if (action === 'download') {
-      const result = await savePdfToDevice(typed, filename, { directUrl })
+      const result = await savePdfToDevice(typed, filename, { directUrl: requiresAuth ? null : directUrl })
       toast.dismiss(toastId)
       if (result === 'cancelled') return true
       if (result === 'picker' || result === 'share') {
@@ -329,10 +399,13 @@ export function openStatementPdfForPrint (customerId, fromDate, toDate, customer
     toast.error('Please select a customer first.')
     return false
   }
-  return runInstantPrint({
-    getDirectUrl: (opts) => getStatementPdfUrl(customerId, fromDate, toDate, opts),
-    fetchPdf: () => customersAPI.getCustomerStatement(customerId, fromDate, toDate),
-    filename: safeStatementName(customerName, 'statement')
+  const from = toDateOnly(fromDate)
+  const to = toDateOnly(toDate)
+  return runAuthenticatedPrint({
+    fetchPdf: () => customersAPI.getCustomerStatement(customerId, from, to),
+    filename: safeStatementName(customerName, 'statement'),
+    debounceKey: `print:statement:${customerId}:${from}:${to}`,
+    getDirectUrl: (opts) => getStatementPdfUrl(customerId, from, to, opts)
   })
 }
 
@@ -341,10 +414,13 @@ export function openPendingBillsPdfForPrint (customerId, fromDate, toDate, custo
     toast.error('Please select a customer first.')
     return false
   }
-  return runInstantPrint({
-    getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, fromDate, toDate, opts),
-    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
-    filename: safeStatementName(customerName, 'pending_bills')
+  const from = toDateOnly(fromDate)
+  const to = toDateOnly(toDate)
+  return runAuthenticatedPrint({
+    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, from, to),
+    filename: safeStatementName(customerName, 'pending_bills'),
+    debounceKey: `print:pending:${customerId}:${from}:${to}`,
+    getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, from, to, opts)
   })
 }
 
@@ -353,14 +429,17 @@ export function downloadStatementPdf (customerId, fromDate, toDate, customerName
     toast.error('Please select a customer first.')
     return false
   }
+  const from = toDateOnly(fromDate)
+  const to = toDateOnly(toDate)
   return runPdfAction({
     title: `Download Statement — ${customerName || 'Customer'}`,
     filename: safeStatementName(customerName, 'statement'),
-    fetchPdf: () => customersAPI.getCustomerStatement(customerId, fromDate, toDate),
-    getDirectUrl: (opts) => getStatementPdfUrl(customerId, fromDate, toDate, opts),
+    fetchPdf: () => customersAPI.getCustomerStatement(customerId, from, to),
+    getDirectUrl: (opts) => getStatementPdfUrl(customerId, from, to, opts),
     action: 'download',
-    debounceKey: `download:statement:${customerId}:${fromDate}:${toDate}`,
-    openModalOnFailure: false
+    debounceKey: `download:statement:${customerId}:${from}:${to}`,
+    openModalOnFailure: false,
+    requiresAuth: true
   })
 }
 
@@ -369,14 +448,17 @@ export function downloadPendingBillsPdf (customerId, fromDate, toDate, customerN
     toast.error('Please select a customer first.')
     return false
   }
+  const from = toDateOnly(fromDate)
+  const to = toDateOnly(toDate)
   return runPdfAction({
     title: `Download Pending Bills — ${customerName || 'Customer'}`,
     filename: safeStatementName(customerName, 'pending_bills'),
-    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, fromDate, toDate),
-    getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, fromDate, toDate, opts),
+    fetchPdf: () => customersAPI.getCustomerPendingBillsPdf(customerId, from, to),
+    getDirectUrl: (opts) => getPendingBillsPdfUrl(customerId, from, to, opts),
     action: 'download',
-    debounceKey: `download:pending:${customerId}:${fromDate}:${toDate}`,
-    openModalOnFailure: false
+    debounceKey: `download:pending:${customerId}:${from}:${to}`,
+    openModalOnFailure: false,
+    requiresAuth: true
   })
 }
 

@@ -120,7 +120,7 @@ namespace FrozenApi.Controllers
 
         /// <summary>Export worksheet as PDF for sharing with partners.</summary>
         [HttpGet("worksheet/export/pdf")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Staff")]
         public async Task<ActionResult> ExportWorksheetPdf(
             [FromQuery] string? period = null,
             [FromQuery] DateTime? fromDate = null,
@@ -455,7 +455,7 @@ namespace FrozenApi.Controllers
         }
 
         [HttpGet("export/pdf")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Staff")]
         public async Task<ActionResult> ExportReportPdf(
             [FromQuery] DateTime? fromDate = null,
             [FromQuery] DateTime? toDate = null)
@@ -732,7 +732,7 @@ namespace FrozenApi.Controllers
         }
 
         [HttpGet("sales-ledger/export/pdf")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Staff")]
         public async Task<ActionResult> ExportSalesLedgerPdf(
             [FromQuery] DateTime? fromDate = null,
             [FromQuery] DateTime? toDate = null,
@@ -797,7 +797,7 @@ namespace FrozenApi.Controllers
         }
 
         [HttpGet("pending-bills/export/pdf")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Staff")]
         public async Task<ActionResult> ExportPendingBillsPdf(
             [FromQuery] DateTime? fromDate = null,
             [FromQuery] DateTime? toDate = null,

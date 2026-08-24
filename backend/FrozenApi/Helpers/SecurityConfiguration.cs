@@ -4,6 +4,7 @@ Author: AI Assistant
 Date: 2024
 */
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System;
@@ -38,6 +39,16 @@ namespace FrozenApi.Helpers
 
                     options.Events = new JwtBearerEvents
                     {
+                        // Allow PDF print/open in new tabs via ?access_token= (window.open cannot send Authorization header)
+                        OnMessageReceived = context =>
+                        {
+                            var accessToken = context.Request.Query["access_token"].FirstOrDefault();
+                            if (!string.IsNullOrEmpty(accessToken) && IsPdfAuthPath(context.Request.Path))
+                            {
+                                context.Token = accessToken;
+                            }
+                            return Task.CompletedTask;
+                        },
                         OnAuthenticationFailed = context =>
                         {
                             if (context.Exception.GetType() == typeof(SecurityTokenExpiredException))
@@ -182,6 +193,18 @@ namespace FrozenApi.Helpers
             Console.WriteLine($"✅ CORS: Configuration complete. Environment: {(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Not Set")}");
 
             return services;
+        }
+
+        /// <summary>
+        /// Only accept JWT from query string on PDF-related routes (print/open in new tab).
+        /// </summary>
+        private static bool IsPdfAuthPath(PathString path)
+        {
+            var value = path.Value ?? string.Empty;
+            return value.Contains("/pdf", StringComparison.OrdinalIgnoreCase)
+                   || value.EndsWith("/statement", StringComparison.OrdinalIgnoreCase)
+                   || value.Contains("pending-bills-pdf", StringComparison.OrdinalIgnoreCase)
+                   || value.Contains("export/pdf", StringComparison.OrdinalIgnoreCase);
         }
 
         public static IApplicationBuilder UseSecurityMiddleware(this IApplicationBuilder app, IWebHostEnvironment environment)

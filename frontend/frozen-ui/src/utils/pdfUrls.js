@@ -16,6 +16,22 @@ function buildQuery (params) {
   return qs.toString()
 }
 
+/** Normalize to YYYY-MM-DD for API date filters. */
+function toDateOnly (value) {
+  if (!value) return ''
+  if (typeof value === 'string') {
+    const m = value.match(/^(\d{4}-\d{2}-\d{2})/)
+    if (m) return m[1]
+    const d = new Date(value)
+    if (!Number.isNaN(d.getTime())) return d.toISOString().split('T')[0]
+    return value
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0]
+  }
+  return String(value)
+}
+
 function withAuth (url) {
   const token = getAuthToken()
   if (!token) return url
@@ -51,8 +67,8 @@ export function getReceiptPdfUrl (receiptId, opts = {}) {
 
 export function getStatementPdfUrl (customerId, fromDate, toDate, opts = {}) {
   const qs = buildQuery({
-    fromDate: fromDate || '',
-    toDate: toDate || '',
+    fromDate: toDateOnly(fromDate),
+    toDate: toDateOnly(toDate),
     ...pdfFlags(opts)
   })
   return withAuth(`${API_BASE_URL}/customers/${customerId}/statement?${qs}`)
@@ -60,8 +76,8 @@ export function getStatementPdfUrl (customerId, fromDate, toDate, opts = {}) {
 
 export function getPendingBillsPdfUrl (customerId, fromDate, toDate, opts = {}) {
   const qs = buildQuery({
-    fromDate: fromDate || '',
-    toDate: toDate || '',
+    fromDate: toDateOnly(fromDate),
+    toDate: toDateOnly(toDate),
     ...pdfFlags(opts)
   })
   return withAuth(`${API_BASE_URL}/customers/${customerId}/pending-bills-pdf?${qs}`)
