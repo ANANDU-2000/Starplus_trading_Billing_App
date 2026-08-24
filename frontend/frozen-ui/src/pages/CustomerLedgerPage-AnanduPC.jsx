@@ -49,13 +49,13 @@ import {
   openReceiptPdfForPrint,
   downloadReceiptPdf
 } from '../utils/invoicePdfActions'
-import { saveLedgerSession, loadLedgerSession, formatLedgerPeriod } from '../utils/ledgerSession'
+import { saveLedgerSession, loadLedgerSession, formatLedgerPeriod, defaultLedgerDateRange } from '../utils/ledgerSession'
 
 const CustomerLedgerPage = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
-  const [customersLoading, setCustomersLoading] = useState(false)
+  const [customersLoading, setCustomersLoading] = useState(true)
   const [paymentLoading, setPaymentLoading] = useState(false) // Separate loading state for payment submission
   const [pdfLoading, setPdfLoading] = useState(false)
   const [customerLoading, setCustomerLoading] = useState(false) // Separate loading state for customer creation
@@ -69,6 +69,9 @@ const CustomerLedgerPage = () => {
   const loadRequestSeqRef = useRef(0) // Ignore stale async responses when multiple loads race
   /** Always current selected customer id — use after await in loadCustomerData (avoids stale closure when switching customers). */
   const selectedCustomerIdRef = useRef(null)
+  /** Prevent persist from wiping saved session before hydrate / customer restore finishes. */
+  const sessionReadyRef = useRef(false)
+  const sessionRestoreTriedRef = useRef(false)
   const VALIDATION_TOAST_THROTTLE_MS = 15000
   const RECALC_COOLDOWN_MS = 8000
   const [customers, setCustomers] = useState([])
@@ -84,8 +87,11 @@ const CustomerLedgerPage = () => {
   const [outstandingInvoices, setOutstandingInvoices] = useState([])
   const [customerSummary, setCustomerSummary] = useState(null)
   
-  // UI State
-  const [activeTab, setActiveTab] = useState('ledger') // ledger, invoices, payments, reports
+  // UI State — hydrate dates/tab/filters from localStorage so F5 keeps the client's filtered view
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = loadLedgerSession()
+    return saved?.activeTab || 'ledger'
+  })
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [paymentModalInvoiceId, setPaymentModalInvoiceId] = useState(null)
   const [showInvoiceModal, setShowInvoiceModal] = useState(false)
@@ -93,13 +99,16 @@ const CustomerLedgerPage = () => {
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
   const [showEditCustomerModal, setShowEditCustomerModal] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState(null)
-  const [dateRange, setDateRange] = useState({
-    from: new Date(new Date().setDate(1)).toISOString().split('T')[0], // First day of month
-    to: new Date().toISOString().split('T')[0] // Today
+  const [dateRange, setDateRange] = useState(() => {
+    const saved = loadLedgerSession()
+    if (saved?.dateFrom && saved?.dateTo) {
+      return { from: saved.dateFrom, to: saved.dateTo }
+    }
+    return defaultLedgerDateRange()
   })
-  const [ledgerFilters, setLedgerFilters] = useState({
-    status: 'all',
-    type: 'all'
+  const [ledgerFilters, setLedgerFilters] = useState(() => {
+    const saved = loadLedgerSession()
+    return saved?.ledgerFilters || { status: 'all', type: 'all' }
   })
   const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [selectedPaymentIds, setSelectedPaymentIds] = useState([])
@@ -207,22 +216,9 @@ const CustomerLedgerPage = () => {
     fetchCustomers()
   }, [])
 
-  // Restore ledger session (dates, tab, filters) on mount
+  // Persist ledger session only after hydrate — never overwrite saved customer/dates with null defaults on mount
   useEffect(() => {
-    const saved = loadLedgerSession()
-    if (saved?.dateFrom && saved?.dateTo) {
-      setDateRange({ from: saved.dateFrom, to: saved.dateTo })
-    }
-    if (saved?.activeTab) {
-      setActiveTab(saved.activeTab)
-    }
-    if (saved?.ledgerFilters) {
-      setLedgerFilters(saved.ledgerFilters)
-    }
-  }, [])
-
-  // Persist ledger session for back-navigation from POS
-  useEffect(() => {
+    if (!sessionReadyRef.current) return
     saveLedgerSession({
       customerId: selectedCustomer?.id ?? null,
       dateFrom: dateRange.from,
@@ -232,50 +228,89 @@ const CustomerLedgerPage = () => {
     })
   }, [selectedCustomer?.id, dateRange.from, dateRange.to, activeTab, ledgerFilters])
 
-  // Load customer from URL parameter
+  // Load customer from URL parameter, else restore last customer from session (F5 / return from POS)
   useEffect(() => {
+    // Wait until first customers fetch finishes (even if list is empty)
+    if (customersLoading) return
+
     const customerIdParam = searchParams.get('customerId')
     if (customerIdParam === 'cash') {
       setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
+      sessionReadyRef.current = true
       return
     }
     if (customerIdParam) {
-      const customerId = parseInt(customerIdParam)
+      const customerId = parseInt(customerIdParam, 10)
       if (!isNaN(customerId)) {
         const customer = customers.find(c => c.id == customerId)
         if (customer) {
           setSelectedCustomer(customer)
+          sessionReadyRef.current = true
         } else if (customers.length > 0) {
-          // Customer not found in list, try to fetch it
           customersAPI.getCustomer(customerId).then(response => {
             if (response?.success && response?.data) {
               setSelectedCustomer(response.data)
             } else {
               setSearchParams({}, { replace: true })
             }
+            sessionReadyRef.current = true
           }).catch(err => {
             console.error('Failed to load customer from URL:', err)
             setSearchParams({}, { replace: true })
+            sessionReadyRef.current = true
           })
+        } else {
+          sessionReadyRef.current = true
         }
+      } else {
+        sessionReadyRef.current = true
       }
+      return
     }
-  }, [searchParams, customers])
 
-  // Restore selected customer from session when URL has no customerId
-  useEffect(() => {
-    if (searchParams.get('customerId') || customers.length === 0 || selectedCustomer) return
+    // No URL customerId — restore from saved session once and put it back in the URL
+    if (selectedCustomer) {
+      sessionReadyRef.current = true
+      return
+    }
+    if (sessionRestoreTriedRef.current) {
+      sessionReadyRef.current = true
+      return
+    }
+    sessionRestoreTriedRef.current = true
+
     const saved = loadLedgerSession()
-    if (!saved?.customerId) return
+    if (!saved?.customerId) {
+      sessionReadyRef.current = true
+      return
+    }
     if (saved.customerId === 'cash') {
       setSelectedCustomer({ id: 'cash', name: 'Cash Customer', balance: 0 })
+      setSearchParams({ customerId: 'cash' }, { replace: true })
+      sessionReadyRef.current = true
       return
     }
     const customer = customers.find(c => c.id == saved.customerId)
     if (customer) {
       setSelectedCustomer(customer)
+      setSearchParams({ customerId: String(customer.id) }, { replace: true })
+      sessionReadyRef.current = true
+      return
     }
-  }, [customers, searchParams, selectedCustomer])
+    if (customers.length === 0) {
+      sessionReadyRef.current = true
+      return
+    }
+    customersAPI.getCustomer(saved.customerId).then(response => {
+      if (response?.success && response?.data) {
+        setSelectedCustomer(response.data)
+        setSearchParams({ customerId: String(response.data.id) }, { replace: true })
+      }
+      sessionReadyRef.current = true
+    }).catch(() => {
+      sessionReadyRef.current = true
+    })
+  }, [searchParams, customers, customersLoading, selectedCustomer, setSearchParams])
 
   // Load customer data when selected (debounced to prevent excessive calls).
   // Intentionally does NOT depend on showReceiptModal/selectedPaymentIds so opening/closing receipt modal does not trigger reload.

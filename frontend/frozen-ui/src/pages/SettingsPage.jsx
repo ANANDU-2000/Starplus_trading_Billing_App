@@ -661,7 +661,7 @@ const SettingsPage = () => {
             <p className="text-sm text-gray-600">
               Run the tester on your Honor/Android tablet before using POS Print or Ledger Print PDF.
             </p>
-            <PdfPrintTester user={user} />
+            <PdfPrintTester user={user} variant="panel" />
             <div className="text-sm text-gray-600 space-y-2 border-t pt-4">
               <p className="font-medium text-gray-800">If PDF still fails:</p>
               <ol className="list-decimal list-inside space-y-1">

@@ -39,8 +39,13 @@ const Layout = () => {
             <Menu className="h-6 w-6" />
           </button>
           <Logo size="small" className="flex-1 justify-center" />
-          <div className="flex items-center gap-1">
-            {user?.role?.toLowerCase() === 'admin' && <AlertNotifications />}
+            <div className="flex items-center gap-1">
+            {user?.role?.toLowerCase() === 'admin' && (
+              <>
+                <PdfPrintTester adminOnly user={user} variant="icon" />
+                <AlertNotifications />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -112,6 +117,7 @@ const Layout = () => {
               {/* Top Bar Icons - Admin Only */}
               {user?.role?.toLowerCase() === 'admin' && (
                 <>
+                  <PdfPrintTester adminOnly user={user} variant="icon" />
                   <button
                     onClick={() => navigate('/backup')}
                     className="p-2 hover:bg-blue-700 rounded-lg transition flex items-center justify-center"
@@ -161,8 +167,7 @@ const Layout = () => {
             </div>
           </div>
         </div>
-        {/* Page content */}
-        <PdfPrintTester adminOnly user={user} />
+        {/* Page content — PDF tester lives in header icon only (no banner) */}
         <main className="flex-1 pb-20 lg:pb-6 pt-14 lg:pt-20">
           <div className="py-1 sm:py-2 lg:py-6">
             <div className="w-full px-2 sm:px-3 lg:px-4">

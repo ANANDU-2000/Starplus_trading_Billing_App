@@ -1,20 +1,45 @@
 const LEDGER_SESSION_KEY = 'starplus_ledger_session'
 
-export function saveLedgerSession (state) {
+/** Prefer localStorage so F5 / PWA reloads keep customer + date filters. */
+function storage () {
   try {
-    sessionStorage.setItem(LEDGER_SESSION_KEY, JSON.stringify(state))
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+export function saveLedgerSession (state) {
+  const store = storage()
+  if (!store) return
+  try {
+    store.setItem(LEDGER_SESSION_KEY, JSON.stringify(state))
   } catch {
     // ignore quota / private mode
   }
 }
 
 export function loadLedgerSession () {
+  const store = storage()
+  if (!store) return null
   try {
-    const raw = sessionStorage.getItem(LEDGER_SESSION_KEY)
-    return raw ? JSON.parse(raw) : null
+    const raw = store.getItem(LEDGER_SESSION_KEY)
+    if (raw) return JSON.parse(raw)
   } catch {
-    return null
+    /* ignore */
   }
+  // Migrate older sessionStorage copies once
+  try {
+    const legacy = sessionStorage.getItem(LEDGER_SESSION_KEY)
+    if (legacy) {
+      store.setItem(LEDGER_SESSION_KEY, legacy)
+      sessionStorage.removeItem(LEDGER_SESSION_KEY)
+      return JSON.parse(legacy)
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
 }
 
 export function formatLedgerPeriod (from, to) {
@@ -25,4 +50,12 @@ export function formatLedgerPeriod (from, to) {
       year: 'numeric'
     })
   return `Period: ${fmt(from)} – ${fmt(to)}`
+}
+
+/** Defaults used when nothing is saved yet */
+export function defaultLedgerDateRange () {
+  return {
+    from: new Date(new Date().setDate(1)).toISOString().split('T')[0],
+    to: new Date().toISOString().split('T')[0]
+  }
 }

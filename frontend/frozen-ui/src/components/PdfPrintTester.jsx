@@ -1,13 +1,11 @@
-import { useState, useCallback } from 'react'
-import { ChevronDown, ChevronUp, Printer, CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { Printer, CheckCircle, XCircle, Loader2, X } from 'lucide-react'
 import { salesAPI } from '../services'
 import { validatePdfBlob } from '../utils/pdfBlob'
 import { getHealthUrl, getInvoicePdfUrl } from '../utils/pdfUrls'
-import { openPdfDirectUrl, needsBlobPdfFlow, instantPrintPdfUrl } from '../utils/blobDownload'
+import { needsBlobPdfFlow, instantPrintPdfUrl } from '../utils/blobDownload'
 import { useAppUpdate } from '../hooks/useAppUpdate'
 import { isHonorOrAndroid } from '../utils/pdfHints'
-
-const STORAGE_KEY = 'pdf_tester_collapsed'
 
 function StatusRow ({ label, ok, detail }) {
   return (
@@ -25,29 +23,74 @@ function StatusRow ({ label, ok, detail }) {
   )
 }
 
-export default function PdfPrintTester ({ adminOnly = false, user }) {
+function TestResults ({ results, running, onRun, embeddedBuild, embeddedCommit }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-600">
+        Run before printing on tablet. Build: {embeddedBuild || 'OLD'} ({embeddedCommit || 'legacy'})
+      </p>
+      {isHonorOrAndroid() && (
+        <p className="text-xs text-amber-900 bg-amber-50 rounded p-2">
+          Honor/Android: After PDF opens → ⋮ → Share → Print if Print is missing from the menu.
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={running}
+        className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-semibold hover:bg-amber-700 disabled:opacity-50"
+      >
+        {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+        Run PDF test
+      </button>
+      {results && (
+        <div className="grid gap-1.5 mt-1 bg-gray-50 rounded border border-gray-100 p-2">
+          <StatusRow label="API health" ok={results.api.ok} detail={results.api.detail} />
+          <StatusRow label="PDF bytes (%PDF)" ok={results.pdfBytes.ok} detail={results.pdfBytes.detail} />
+          <StatusRow label="Direct URL open" ok={results.directUrl.ok} detail={results.directUrl.detail} />
+          <StatusRow label="Share API" ok={results.shareApi.ok} detail={results.shareApi.detail} />
+          <StatusRow label="Device mode" ok={results.mobile.ok} detail={results.mobile.detail} />
+          <StatusRow label="App build" ok={results.build.ok} detail={results.build.detail} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * PDF print diagnostics.
+ * - variant="icon" (header): single icon; panel opens only on click
+ * - variant="panel": inline panel for Settings (no page-wide banner)
+ */
+export default function PdfPrintTester ({
+  adminOnly = false,
+  user,
+  variant = 'icon'
+}) {
   const { embeddedBuild, embeddedCommit } = useAppUpdate()
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
+  const [open, setOpen] = useState(false)
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState(null)
+  const rootRef = useRef(null)
 
-  if (adminOnly && user?.role?.toLowerCase() !== 'admin') return null
+  const isAdmin = user?.role?.toLowerCase() === 'admin'
+  const allowed = !adminOnly || isAdmin
 
-  const toggleCollapsed = () => {
-    const next = !collapsed
-    setCollapsed(next)
-    try {
-      localStorage.setItem(STORAGE_KEY, next ? '1' : '0')
-    } catch {
-      /* ignore */
+  useEffect(() => {
+    if (!open || variant !== 'icon') return
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
     }
-  }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, variant])
 
   const runTests = useCallback(async () => {
     setRunning(true)
@@ -109,54 +152,58 @@ export default function PdfPrintTester ({ adminOnly = false, user }) {
     setRunning(false)
   }, [embeddedBuild, embeddedCommit])
 
+  if (!allowed) return null
+
+  if (variant === 'panel') {
+    return (
+      <div className="border border-amber-200 bg-amber-50/50 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-amber-900 mb-2 flex items-center gap-2">
+          <Printer className="h-4 w-4" />
+          PDF Print Test
+        </h3>
+        <TestResults
+          results={results}
+          running={running}
+          onRun={runTests}
+          embeddedBuild={embeddedBuild}
+          embeddedCommit={embeddedCommit}
+        />
+      </div>
+    )
+  }
+
   return (
-    <div className="bg-amber-50 border-b border-amber-200 shrink-0">
+    <div className="relative" ref={rootRef}>
       <button
         type="button"
-        onClick={toggleCollapsed}
-        className="w-full flex items-center justify-between px-3 py-2 text-left text-sm font-medium text-amber-900"
+        onClick={() => setOpen((v) => !v)}
+        className="p-2 hover:bg-blue-700 rounded-lg transition flex items-center justify-center"
+        title="PDF Print Test"
+        aria-label="PDF Print Test"
+        aria-expanded={open}
       >
-        <span className="flex items-center gap-2">
-          <Printer className="h-4 w-4" />
-          PDF Print Tester
-          {results && (
-            <span className="text-xs font-normal text-amber-700">
-              {Object.values(results).filter((r) => r.ok).length}/{Object.keys(results).length} passed
-            </span>
-          )}
-        </span>
-        {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+        <Printer className="h-5 w-5" />
       </button>
-
-      {!collapsed && (
-        <div className="px-3 pb-3 space-y-2">
-          <p className="text-xs text-amber-800">
-            Run this on the tablet before printing invoices. Build: {embeddedBuild || 'OLD'} ({embeddedCommit || 'legacy'})
-          </p>
-          {isHonorOrAndroid() && (
-            <p className="text-xs text-amber-900 bg-amber-100 rounded p-2">
-              Honor/Android: After PDF opens → ⋮ → Share → Print (Print may not appear in Chrome menu directly).
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={runTests}
-            disabled={running}
-            className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-semibold hover:bg-amber-700 disabled:opacity-50"
-          >
-            {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
-            Run PDF test
-          </button>
-          {results && (
-            <div className="grid gap-1.5 mt-2 bg-white rounded border border-amber-100 p-2">
-              <StatusRow label="API health" ok={results.api.ok} detail={results.api.detail} />
-              <StatusRow label="PDF bytes (%PDF)" ok={results.pdfBytes.ok} detail={results.pdfBytes.detail} />
-              <StatusRow label="Direct URL open" ok={results.directUrl.ok} detail={results.directUrl.detail} />
-              <StatusRow label="Share API" ok={results.shareApi.ok} detail={results.shareApi.detail} />
-              <StatusRow label="Device mode" ok={results.mobile.ok} detail={results.mobile.detail} />
-              <StatusRow label="App build" ok={results.build.ok} detail={results.build.detail} />
-            </div>
-          )}
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-1rem)] bg-white text-gray-900 rounded-lg shadow-xl border border-gray-200 z-[60] p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-900">PDF Print Test</h3>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="p-1 rounded hover:bg-gray-100"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4 text-gray-500" />
+            </button>
+          </div>
+          <TestResults
+            results={results}
+            running={running}
+            onRun={runTests}
+            embeddedBuild={embeddedBuild}
+            embeddedCommit={embeddedCommit}
+          />
         </div>
       )}
     </div>
